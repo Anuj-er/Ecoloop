@@ -1,0 +1,154 @@
+import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { authAPI } from '@/lib/api';
+import { useToast } from '@/hooks/use-toast';
+
+interface User {
+  _id: string;
+  username: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  userType: 'individual' | 'organization';
+  avatar?: string;
+  bio?: string;
+  location?: string;
+  interests?: string[];
+  skills?: string[];
+  organization?: {
+    name?: string;
+    website?: string;
+    industry?: string;
+    size?: string;
+  };
+  sustainabilityMetrics?: {
+    carbonFootprint: number;
+    wasteReduced: number;
+    energySaved: number;
+    projectsCompleted: number;
+  };
+  isVerified: boolean;
+}
+
+interface AuthContextType {
+  user: User | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  login: (email: string, password: string) => Promise<void>;
+  register: (userData: any) => Promise<void>;
+  logout: () => void;
+  updateUser: (userData: Partial<User>) => void;
+}
+
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};
+
+interface AuthProviderProps {
+  children: ReactNode;
+}
+
+export const AuthProvider = ({ children }: AuthProviderProps) => {
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const { toast } = useToast();
+
+  // Check if user is already logged in on app start
+  useEffect(() => {
+    const checkAuth = async () => {
+      const token = localStorage.getItem('token');
+      if (token) {
+        try {
+          const response = await authAPI.getMe();
+          setUser(response.data.data);
+        } catch (error) {
+          // Token is invalid, clear it
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+        }
+      }
+      setIsLoading(false);
+    };
+
+    checkAuth();
+  }, []);
+
+  const login = async (email: string, password: string) => {
+    try {
+      const response = await authAPI.login({ email, password });
+      const { token, ...userData } = response.data.data;
+      
+      localStorage.setItem('token', token);
+      localStorage.setItem('user', JSON.stringify(userData));
+      setUser(userData);
+      
+      toast({
+        title: "Welcome back!",
+        description: "Successfully logged in to Eco Loop AI Connect.",
+      });
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Login failed');
+    }
+  };
+
+  const register = async (userData: any) => {
+    try {
+      const response = await authAPI.register(userData);
+      const { token, ...userInfo } = response.data.data;
+      
+      localStorage.setItem('token', token);
+      localStorage.setItem('user', JSON.stringify(userInfo));
+      setUser(userInfo);
+      
+      toast({
+        title: "Welcome to Eco Loop AI Connect!",
+        description: "Your account has been created successfully.",
+      });
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Registration failed');
+    }
+  };
+
+  const logout = async () => {
+    try {
+      await authAPI.logout();
+    } catch (error) {
+      // Even if logout API fails, we still want to clear local data
+      console.error('Logout API error:', error);
+    }
+    
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setUser(null);
+    
+    toast({
+      title: "Logged out",
+      description: "You have been successfully logged out.",
+    });
+  };
+
+  const updateUser = (userData: Partial<User>) => {
+    setUser(prev => prev ? { ...prev, ...userData } : null);
+  };
+
+  const value = {
+    user,
+    isAuthenticated: !!user,
+    isLoading,
+    login,
+    register,
+    logout,
+    updateUser,
+  };
+
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  );
+}; 
