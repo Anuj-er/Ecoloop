@@ -7,9 +7,13 @@ import { asyncHandler } from '../middleware/errorHandler.js';
 // @route   GET /api/users
 // @access  Private
 export const getUsers = asyncHandler(async (req, res) => {
+  console.log('getUsers called with query:', req.query);
+  console.log('User making request:', req.user?._id);
+
   const page = parseInt(req.query.page, 10) || 1;
   const limit = parseInt(req.query.limit, 10) || 10;
   const startIndex = (page - 1) * limit;
+  const endIndex = page * limit;
 
   const {
     search,
@@ -24,7 +28,13 @@ export const getUsers = asyncHandler(async (req, res) => {
   const filter = { isActive: true };
 
   if (search) {
-    filter.$text = { $search: search };
+    // Use regex search instead of text search for better compatibility
+    filter.$or = [
+      { firstName: { $regex: search, $options: 'i' } },
+      { lastName: { $regex: search, $options: 'i' } },
+      { username: { $regex: search, $options: 'i' } },
+      { bio: { $regex: search, $options: 'i' } }
+    ];
   }
 
   if (userType) {
@@ -47,37 +57,55 @@ export const getUsers = asyncHandler(async (req, res) => {
     filter.isVerified = verified === 'true';
   }
 
-  const total = await User.countDocuments(filter);
-  const users = await User.find(filter)
-    .select('-password')
-    .populate('organization', 'name industry size')
-    .skip(startIndex)
-    .limit(limit)
-    .sort({ createdAt: -1 });
+  console.log('Filter object:', JSON.stringify(filter, null, 2));
 
-  // Pagination result
-  const pagination = {};
+  try {
+    console.log('Counting documents...');
+    const total = await User.countDocuments(filter);
+    console.log('Total users found:', total);
 
-  if (endIndex < total) {
-    pagination.next = {
-      page: page + 1,
-      limit
-    };
+    console.log('Finding users...');
+    const users = await User.find(filter)
+      .select('-password')
+      .populate('organization', 'name industry size')
+      .skip(startIndex)
+      .limit(limit)
+      .sort({ createdAt: -1 });
+
+    console.log('Users found:', users.length);
+
+    // Pagination result
+    const pagination = {};
+
+    if (endIndex < total) {
+      pagination.next = {
+        page: page + 1,
+        limit
+      };
+    }
+
+    if (startIndex > 0) {
+      pagination.prev = {
+        page: page - 1,
+        limit
+      };
+    }
+
+    res.json({
+      success: true,
+      count: users.length,
+      pagination,
+      data: users
+    });
+  } catch (error) {
+    console.error('Error in getUsers:', error);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch users',
+      error: error.message
+    });
   }
-
-  if (startIndex > 0) {
-    pagination.prev = {
-      page: page - 1,
-      limit
-    };
-  }
-
-  res.json({
-    success: true,
-    count: users.length,
-    pagination,
-    data: users
-  });
 });
 
 // @desc    Get single user by ID
