@@ -12,6 +12,7 @@ import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
 import postRoutes from './routes/post.js';
 import connectionRoutes from './routes/connection.js';
+import notificationRoutes from './routes/notifications.js';
 import uploadRoutes from './routes/upload.js';
 
 dotenv.config();
@@ -47,6 +48,7 @@ app.get('/', (req, res) => {
       users: '/api/users',
       posts: '/api/posts',
       connections: '/api/connections',
+      notifications: '/api/notifications',
       upload: '/api/upload'
     },
     status: 'Server is running!'
@@ -67,6 +69,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/posts', postRoutes);
 app.use('/api/connections', connectionRoutes);
+app.use('/api/notifications', notificationRoutes);
 app.use('/api/upload', uploadRoutes);
 
 // Not found and error handlers

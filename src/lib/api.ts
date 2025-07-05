@@ -112,4 +112,14 @@ export const connectionsAPI = {
   getRecommendations: () => api.get('/connections/recommendations'),
 };
 
+// Notifications API
+export const notificationsAPI = {
+  getNotifications: (params?: any) => api.get('/notifications', { params }),
+  getUnreadCount: () => api.get('/notifications/unread-count'),
+  markAsRead: (id: string) => api.put(`/notifications/${id}/read`),
+  markAllAsRead: () => api.put('/notifications/mark-all-read'),
+  deleteNotification: (id: string) => api.delete(`/notifications/${id}`),
+  deleteAllNotifications: (params?: any) => api.delete('/notifications', { params }),
+};
+
 export default api; 

@@ -9,6 +9,7 @@ import NotFound from "./pages/NotFound";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import { Profile } from "./components/Profile";
+import { NotificationToast } from "./components/NotificationToast";
 
 const queryClient = new QueryClient();
 
@@ -18,6 +19,7 @@ const App = () => (
       <TooltipProvider>
         <Toaster />
         <Sonner />
+        <NotificationToast />
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<Login />} />

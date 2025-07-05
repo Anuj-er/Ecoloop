@@ -1,6 +1,7 @@
 import Connection from '../models/Connection.js';
 import User from '../models/User.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
+import { createNotification, notificationTemplates } from './notificationController.js';
 
 // @desc    Send connection request
 // @route   POST /api/connections
@@ -52,6 +53,14 @@ export const sendConnectionRequest = asyncHandler(async (req, res) => {
   await connection.populate('requester', 'username firstName lastName avatar organization');
   await connection.populate('recipient', 'username firstName lastName avatar organization');
 
+  // Create notification for recipient
+  try {
+    const notificationData = notificationTemplates.connectionRequest(req.user, recipient);
+    await createNotification(notificationData);
+  } catch (error) {
+    console.error('Error creating connection notification:', error);
+  }
+
   res.status(201).json({
     success: true,
     data: connection
@@ -97,6 +106,15 @@ export const acceptConnection = asyncHandler(async (req, res) => {
   await connection.populate('requester', 'username firstName lastName avatar organization');
   await connection.populate('recipient', 'username firstName lastName avatar organization');
 
+  // Create notification for requester
+  try {
+    const requester = await User.findById(connection.requester);
+    const notificationData = notificationTemplates.connectionAccepted(req.user, requester);
+    await createNotification(notificationData);
+  } catch (error) {
+    console.error('Error creating acceptance notification:', error);
+  }
+
   res.json({
     success: true,
     data: connection
@@ -125,6 +143,15 @@ export const rejectConnection = asyncHandler(async (req, res) => {
   }
 
   await connection.reject();
+
+  // Create notification for requester
+  try {
+    const requester = await User.findById(connection.requester);
+    const notificationData = notificationTemplates.connectionRejected(req.user, requester);
+    await createNotification(notificationData);
+  } catch (error) {
+    console.error('Error creating rejection notification:', error);
+  }
 
   res.json({
     success: true,
@@ -167,6 +194,19 @@ export const sendMessage = asyncHandler(async (req, res) => {
 
   const newMessage = connection.communicationHistory[connection.communicationHistory.length - 1];
 
+  // Create notification for the other user in the connection
+  try {
+    const otherUserId = connection.requester.toString() === req.user._id.toString() 
+      ? connection.recipient 
+      : connection.requester;
+    
+    const otherUser = await User.findById(otherUserId);
+    const notificationData = notificationTemplates.newMessage(req.user, otherUser, newMessage._id);
+    await createNotification(notificationData);
+  } catch (error) {
+    console.error('Error creating message notification:', error);
+  }
+
   res.json({
     success: true,
     data: newMessage
@@ -199,17 +239,35 @@ export const getConnectionRecommendations = asyncHandler(async (req, res) => {
       $ne: req.user._id,
       $nin: connectedUserIds
     },
-    isActive: true,
-    interests: { $in: currentUser.interests }
+    isActive: true
   })
-  .select('username firstName lastName avatar bio interests userType organization sustainabilityMetrics')
+  .select('username firstName lastName avatar bio location interests userType organization')
   .populate('organization', 'name industry')
-  .limit(10)
-  .sort({ 'sustainabilityMetrics.projectsCompleted': -1 });
+  .limit(10);
+
+  // Calculate match score based on interests
+  const recommendationsWithScore = recommendations.map(user => {
+    const commonInterests = currentUser.interests?.filter(interest => 
+      user.interests?.includes(interest)
+    ) || [];
+    
+    const matchScore = user.interests?.length > 0 
+      ? Math.round((commonInterests.length / user.interests.length) * 100)
+      : 0;
+
+    return {
+      ...user.toObject(),
+      matchScore,
+      commonInterests
+    };
+  });
+
+  // Sort by match score
+  recommendationsWithScore.sort((a, b) => b.matchScore - a.matchScore);
 
   res.json({
     success: true,
-    count: recommendations.length,
-    data: recommendations
+    count: recommendationsWithScore.length,
+    data: recommendationsWithScore
   });
 }); 

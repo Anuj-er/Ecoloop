@@ -1,5 +1,4 @@
-
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -8,450 +7,577 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { MapPin, Star, Users, Handshake, Package, Search, Truck, MessageCircle, CheckCircle, ArrowRight } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { MapPin, Star, Users, Handshake, Package, Search, Truck, MessageCircle, CheckCircle, ArrowRight, Loader2, UserPlus, LogIn, Heart, Calendar, TrendingUp, Globe } from "lucide-react";
+import { connectionsAPI, usersAPI } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 
 export const Connect = () => {
   const [filter, setFilter] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [showDealDemo, setShowDealDemo] = useState(false);
   const [dealStep, setDealStep] = useState(1);
-  const [selectedConnection, setSelectedConnection] = useState<number | null>(null);
-  const [activeDeals, setActiveDeals] = useState<number[]>([]);  const connections = [
-    {
-      id: 1,
-      name: "Meera Textiles",
-      type: "Factory",
-      location: "Delhi, 5km away",
-      pincode: "110001",
-      rating: 4.7,
-      materials: ["Cotton", "Silk", "Polyester"],
-      status: "potential",
-      dealValue: "₹750/month",
-      description: "Family-run textile business specializing in traditional fabrics. We're looking for fabric scraps for pillow stuffing manufacturing. Quality focused, fair pricing.",
-      matchScore: 95,
-      lastActive: "2 hours ago",
-      image: "/images/connect/MeeraTExtiles.png",
-      ownerName: "Meera Kumari",
-      experience: "15+ years in textile industry",
-      verified: true,
-      employeeCount: "12-15 workers",
-      businessType: "Manufacturing"
-    },
-    {
-      id: 2,
-      name: "Ravi Kumar",
-      type: "Craftsman",
-      location: "Jodhpur, 8km away",
-      pincode: "110025",
-      rating: 4.9,
-      materials: ["Wood", "Metal"],
-      status: "skill-swap",
-      dealValue: "Skill Exchange",
-      description: "Third generation carpenter who specializes in traditional furniture repair and making. Looking to exchange carpentry skills for tailoring services.",
-      matchScore: 88,
-      lastActive: "1 day ago",
-      image: "/images/connect/RaviKumar.png",
-      ownerName: "Ravi Kumar",
-      experience: "20+ years in carpentry",
-      verified: true,
-      employeeCount: "Solo craftsman",
-      businessType: "Individual Artisan"
-    },
-    {
-      id: 3,
-      name: "GreenCraft Studios",
-      type: "Startup",
-      location: "Gurgaon, 12km away",
-      pincode: "122001",
-      rating: 4.5,
-      materials: ["Fabric", "Paper", "Cardboard"],
-      status: "potential",
-      dealValue: "₹300-500",
-      description: "Young startup creating eco-friendly products from waste materials. Founded by local entrepreneurs passionate about sustainability and rural employment.",
-      matchScore: 78,
-      lastActive: "3 hours ago",
-      image: "/images/connect/GreenCraft Studios.png",
-      ownerName: "Rajesh Gupta",
-      experience: "2 years in eco-business",
-      verified: true,
-      employeeCount: "8-10 people",
-      businessType: "Social Enterprise"
-    },
-    {
-      id: 4,
-      name: "Local Recycling Hub",
-      type: "Recycler",
-      location: "Delhi, 3km away",
-      pincode: "110001",
-      rating: 4.2,
-      materials: ["All Materials"],
-      status: "bulk-buyer",
-      dealValue: "₹50-200/kg",
-      description: "Community-based recycling facility serving 5 local areas. Fair pricing, transparent dealings, and quick payments. Supporting local waste management.",
-      matchScore: 65,
-      lastActive: "5 hours ago",
-      image: "/images/connect/Local Recycling Hub.png",
-      ownerName: "Suresh Patel",
-      experience: "10+ years in recycling",
-      verified: true,
-      employeeCount: "20+ workers",
-      businessType: "Community Service"
-    }
-  ];
+  const [selectedConnection, setSelectedConnection] = useState<any>(null);
+  const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [existingConnections, setExistingConnections] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const { toast } = useToast();
+  const { user: currentUser, isAuthenticated, isLoading } = useAuth();
 
-  const filteredConnections = connections.filter(conn => {
-    const matchesFilter = filter === "all" || conn.status === filter;
-    const matchesSearch = conn.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         conn.materials.some(mat => mat.toLowerCase().includes(searchTerm.toLowerCase()));
+  // Load all data on component mount
+  useEffect(() => {
+    if (isAuthenticated && !isLoading) {
+      loadAllUsers();
+      loadExistingConnections();
+    }
+  }, [isAuthenticated, isLoading]);
+
+  const loadAllUsers = async () => {
+    if (!isAuthenticated) {
+      toast({
+        title: "Authentication required",
+        description: "Please log in to view users and connections.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await usersAPI.getUsers({ limit: 50 });
+      setAllUsers(response.data.data || []);
+    } catch (error: any) {
+      console.error("Failed to load users:", error);
+      
+      if (error.response?.status === 401) {
+        toast({
+          title: "Authentication required",
+          description: "Please log in to view users and connections.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Failed to load users",
+          description: error.response?.data?.message || "Please refresh the page to try again.",
+          variant: "destructive",
+        });
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadExistingConnections = async () => {
+    if (!isAuthenticated) return;
+    
+    try {
+      const response = await connectionsAPI.getConnections();
+      setExistingConnections(response.data.data || []);
+    } catch (error) {
+      console.error("Failed to load connections:", error);
+    }
+  };
+
+  // Get connected user IDs to filter them out
+  const getConnectedUserIds = () => {
+    return existingConnections.map(conn => {
+      // Determine which user is the other party in the connection
+      return conn.requester._id === currentUser?._id ? conn.recipient._id : conn.requester._id;
+    });
+  };
+
+  // Filter users to show only those we can connect with
+  const getAvailableUsers = () => {
+    const connectedUserIds = getConnectedUserIds();
+    
+    return allUsers.filter(user => 
+      user._id !== currentUser?._id && // Don't show current user
+      !connectedUserIds.includes(user._id) && // Don't show already connected users
+      user.isActive !== false // Only show active users
+    );
+  };
+
+  const filteredUsers = getAvailableUsers().filter(user => {
+    const matchesFilter = filter === "all" || 
+                         (filter === "individual" && user.userType === "individual") ||
+                         (filter === "organization" && user.userType === "organization");
+    
+    const matchesSearch = user.firstName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         user.lastName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         user.username?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         user.organization?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         user.interests?.some((interest: string) => interest.toLowerCase().includes(searchTerm.toLowerCase()));
+    
     return matchesFilter && matchesSearch;
   });
-  const handleConnect = (connectionId: number) => {
-    console.log(`Connecting with ${connectionId}`);
-    setSelectedConnection(connectionId);
-    setShowDealDemo(true);
-    setDealStep(1);
-  };
 
-  const completeDeal = () => {
-    if (selectedConnection) {
-      setActiveDeals([...activeDeals, selectedConnection]);
-      setShowDealDemo(false);
-      setSelectedConnection(null);
-      setDealStep(1);
+  const handleConnect = async (userId: string) => {
+    if (!isAuthenticated) {
+      toast({
+        title: "Authentication required",
+        description: "Please log in to send connection requests.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      await connectionsAPI.sendRequest({
+        recipientId: userId,
+        message: "I'm interested in connecting with you for potential collaboration.",
+        projectInterest: "recycling",
+        collaborationType: "partnership"
+      });
+
+      toast({
+        title: "Connection request sent!",
+        description: "The user will be notified of your request.",
+      });
+
+      // Update the user status to show request sent
+      setAllUsers(prev => prev.map(user => 
+        user._id === userId ? { ...user, connectionStatus: 'pending' } : user
+      ));
+    } catch (error: any) {
+      toast({
+        title: "Failed to send request",
+        description: error.response?.data?.message || "Something went wrong",
+        variant: "destructive",
+      });
     }
   };
 
-  const nextStep = () => setDealStep(prev => prev + 1);
-  const prevStep = () => setDealStep(prev => prev - 1);
-  const renderDealStep = () => {
-    const selectedConn = connections.find(conn => conn.id === selectedConnection);
-    if (!selectedConn) return null;
-
-    switch (dealStep) {
-      case 1:
-        return (
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold">Step 1: Initial Connection</h3>
-            <div className="bg-blue-50 p-4 rounded-lg">
-              <div className="flex items-center space-x-3 mb-3">
-                <Avatar>
-                  <AvatarImage src={selectedConn.image} />
-                  <AvatarFallback>{selectedConn.name[0]}</AvatarFallback>
-                </Avatar>
-                <div>
-                  <p className="font-medium">{selectedConn.name}</p>
-                  <p className="text-sm text-gray-600">{selectedConn.location}</p>
-                  <p className="text-xs text-gray-500">Owner: {selectedConn.ownerName}</p>
-                </div>
-              </div>
-              <div className="space-y-2 text-sm">
-                <p><strong>Business Type:</strong> {selectedConn.businessType}</p>
-                <p><strong>Experience:</strong> {selectedConn.experience}</p>
-                <p><strong>Team Size:</strong> {selectedConn.employeeCount}</p>
-                <p><strong>About:</strong> {selectedConn.description}</p>
-              </div>
-            </div>
-            <Button onClick={nextStep} className="w-full">Send Connection Request</Button>
-          </div>
-        );
-      
-      case 2:
-        return (
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold">Step 2: Negotiate Terms</h3>
-            <div className="space-y-3">
-              <div>
-                <label className="text-sm font-medium">Material Quantity</label>
-                <Input placeholder="5 kg cotton fabric scraps" />
-              </div>
-              <div>
-                <label className="text-sm font-medium">Price per kg</label>
-                <Input placeholder="₹150" />
-              </div>
-              <div>
-                <label className="text-sm font-medium">Delivery Method</label>
-                <Select>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Choose delivery option" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="delhivery">Delhivery (₹45 - 2 days)</SelectItem>
-                    <SelectItem value="porter">Porter (₹60 - Same day)</SelectItem>
-                    <SelectItem value="dunzo">Dunzo (₹35 - 1 day)</SelectItem>
-                    <SelectItem value="self">Self Pickup</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label className="text-sm font-medium">Who pays delivery?</label>
-                <Select>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Payment responsibility" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="buyer">Buyer pays</SelectItem>
-                    <SelectItem value="seller">Seller pays</SelectItem>
-                    <SelectItem value="split">Split 50-50</SelectItem>
-                    <SelectItem value="platform">Let platform decide</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="flex space-x-2">
-              <Button variant="outline" onClick={prevStep}>Back</Button>
-              <Button onClick={nextStep} className="flex-1">Agree to Terms</Button>
-            </div>
-          </div>
-        );
-      
-      case 3:
-        return (
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold">Step 3: Smart Contract Creation</h3>
-            <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
-              <div className="flex items-center space-x-2 mb-3">
-                <CheckCircle className="w-5 h-5 text-green-500" />
-                <span className="font-medium">Smart Contract Generated</span>
-              </div>
-              <div className="text-sm space-y-2">
-                <p><strong>Contract ID:</strong> SC-2024-001847</p>
-                <p><strong>Material:</strong> 5kg Cotton Fabric Scraps</p>
-                <p><strong>Price:</strong> ₹750 (₹150/kg)</p>
-                <p><strong>Delivery:</strong> Delhivery (Buyer pays ₹45)</p>
-                <p><strong>Payment:</strong> Auto-release on delivery confirmation</p>
-              </div>
-            </div>            <div className="bg-green-50 p-3 rounded-lg">
-              <p className="text-sm text-green-700">✓ Fraud Protection Active ✓ Automatic Payment ✓ Dispute Resolution</p>
-            </div>
-            <div className="flex space-x-2">
-              <Button variant="outline" onClick={prevStep}>Back</Button>
-              <Button onClick={completeDeal} className="flex-1 bg-green-500 hover:bg-green-600">Confirm Deal</Button>
-            </div>
-          </div>
-        );
-      
-      case 4:        return (
-          <div className="space-y-4 text-center">
-            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto">
-              <CheckCircle className="w-8 h-8 text-green-500" />
-            </div>
-            <h3 className="text-lg font-semibold">Deal Confirmed!</h3>
-            <div className="bg-green-50 p-4 rounded-lg">
-              <p className="text-sm mb-2">Your deal with {selectedConn?.name} is now active.</p>
-              <p className="text-xs text-gray-600">You'll receive pickup notification within 24 hours.</p>
-            </div>
-            <Button onClick={completeDeal} className="w-full">
-              Continue to Active Deals
-            </Button>
-          </div>
-        );
-      
-      default:
-        return null;
+  const handleAcceptConnection = async (connectionId: string) => {
+    try {
+      await connectionsAPI.acceptConnection(connectionId);
+      toast({
+        title: "Connection accepted!",
+        description: "You are now connected with this user.",
+      });
+      loadExistingConnections(); // Refresh connections
+    } catch (error: any) {
+      toast({
+        title: "Failed to accept connection",
+        description: error.response?.data?.message || "Something went wrong",
+        variant: "destructive",
+      });
     }
   };
+
+  const handleRejectConnection = async (connectionId: string) => {
+    try {
+      await connectionsAPI.rejectConnection(connectionId);
+      toast({
+        title: "Connection rejected",
+        description: "The connection request has been rejected.",
+      });
+      loadExistingConnections(); // Refresh connections
+    } catch (error: any) {
+      toast({
+        title: "Failed to reject connection",
+        description: error.response?.data?.message || "Something went wrong",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Login Prompt for Unauthenticated Users
+  if (!isAuthenticated && !isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-green-50 via-blue-50 to-purple-50 flex items-center justify-center p-4">
+        <Card className="w-full max-w-md bg-white/80 backdrop-blur-sm border-0 shadow-2xl">
+          <CardContent className="p-8 text-center">
+            <div className="flex flex-col items-center space-y-6">
+              <div className="w-20 h-20 bg-gradient-to-r from-green-400 to-blue-500 rounded-full flex items-center justify-center">
+                <Users className="w-10 h-10 text-white" />
+              </div>
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900 mb-3">
+                  Join the Eco Loop Community
+                </h2>
+                <p className="text-gray-600 mb-6 leading-relaxed">
+                  Connect with sustainability enthusiasts, organizations, and businesses. 
+                  Start building meaningful connections for a greener future.
+                </p>
+                <Button 
+                  onClick={() => window.location.href = '/login'}
+                  className="w-full bg-gradient-to-r from-green-500 to-blue-500 hover:from-green-600 hover:to-blue-600 text-white font-semibold py-3 text-lg"
+                >
+                  <LogIn className="w-5 h-5 mr-2" />
+                  Log In to Connect
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Loading State
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-green-50 via-blue-50 to-purple-50 flex items-center justify-center">
+        <Card className="w-full max-w-md bg-white/80 backdrop-blur-sm border-0 shadow-2xl">
+          <CardContent className="p-8 text-center">
+            <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4 text-green-500" />
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">Loading Connections</h3>
+            <p className="text-gray-600">Setting up your sustainable network...</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
-    <div className="max-w-6xl mx-auto p-4 space-y-6 pt-20">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center space-y-4 md:space-y-0">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-800">Smart Connections</h1>
-          <p className="text-gray-600">AI-powered matching based on location, materials, and needs</p>
+    <div className="min-h-screen bg-gradient-to-br from-green-50 via-blue-50 to-purple-50 p-4">
+      <div className="max-w-7xl mx-auto space-y-6">
+        {/* Header Section */}
+        <div className="text-center space-y-4">
+          <h1 className="text-4xl font-bold bg-gradient-to-r from-green-600 to-blue-600 bg-clip-text text-transparent">
+            Connect & Collaborate
+          </h1>
+          <p className="text-xl text-gray-600 max-w-2xl mx-auto">
+            Discover sustainability enthusiasts, organizations, and businesses to build meaningful partnerships
+          </p>
         </div>
-        <div className="flex space-x-2">
-          <Button className="bg-green-500 hover:bg-green-600">
-            List Materials
-          </Button>
-          <Button variant="outline">
-            Skill Swap
-          </Button>
-        </div>
-      </div>
 
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex flex-col md:flex-row space-y-4 md:space-y-0 md:space-x-4">
-            <div className="flex-1">
-              <div className="relative">
-                <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                <Input
-                  placeholder="Search by name, material, or location..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-            </div>
-            <Select value={filter} onValueChange={setFilter}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Filter by status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Connections</SelectItem>
-                <SelectItem value="active">Active Deals</SelectItem>
-                <SelectItem value="skill-swap">Skill Swaps</SelectItem>
-                <SelectItem value="potential">Potential Matches</SelectItem>
-                <SelectItem value="bulk-buyer">Bulk Buyers</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="bg-gradient-to-r from-green-50 to-blue-50 border-green-200">
-        <CardContent className="p-4">
-          <div className="flex items-center space-x-3">
-            <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-            <div>
-              <p className="font-medium text-green-800">AI Smart Matching is Active</p>
-              <p className="text-sm text-green-600">
-                We found {filteredConnections.length} potential matches based on your location (110001), 
-                available materials (Cotton, Silk), and preferences.
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Connections Grid */}
-      <div className="grid md:grid-cols-2 gap-6">
-        {filteredConnections.map(connection => (
-          <Card key={connection.id} className="hover:shadow-lg transition-shadow">
-            <CardHeader>
-              <div className="flex items-start justify-between">
-                <div className="flex items-center space-x-3">
-                  <Avatar className="w-12 h-12">
-                    <AvatarImage src={connection.image} />
-                    <AvatarFallback>{connection.name[0]}</AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <CardTitle className="text-lg">{connection.name}</CardTitle>
-                    <div className="flex items-center space-x-2 text-sm text-gray-600">
-                      <Badge variant="outline" className="text-xs">
-                        {connection.type}
-                      </Badge>
-                      <div className="flex items-center">
-                        <Star className="w-3 h-3 text-yellow-500 mr-1" />
-                        <span>{connection.rating}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <Badge 
-                    className={`text-xs ${
-                      connection.matchScore > 90 ? 'bg-green-100 text-green-800' :
-                      connection.matchScore > 80 ? 'bg-blue-100 text-blue-800' :
-                      'bg-yellow-100 text-yellow-800'
-                    }`}
-                  >
-                    {connection.matchScore}% Match
-                  </Badge>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center text-sm text-gray-600">
-                <MapPin className="w-4 h-4 mr-1" />
-                <span>{connection.location}</span>
-                <span className="ml-2 text-xs">PIN: {connection.pincode}</span>
-              </div>
-
-              <p className="text-sm text-gray-700">{connection.description}</p>
-
-              <div className="flex flex-wrap gap-1">
-                {connection.materials.map(material => (
-                  <Badge key={material} variant="secondary" className="text-xs">
-                    {material}
-                  </Badge>
-                ))}
-              </div>
-
-              <div className="flex items-center justify-between">
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Card className="bg-gradient-to-r from-green-500 to-green-600 text-white border-0">
+            <CardContent className="p-4">
+              <div className="flex items-center space-x-3">
+                <Users className="w-8 h-8" />
                 <div>
-                  <p className="text-sm font-medium text-green-600">{connection.dealValue}</p>
-                  <p className="text-xs text-gray-500">Last active: {connection.lastActive}</p>
-                </div>                <div className="flex space-x-2">
-                  {activeDeals.includes(connection.id) ? (
-                    <Button size="sm" className="bg-green-500 hover:bg-green-600">
-                      <Package className="w-4 h-4 mr-1" />
-                      Active Deal
-                    </Button>
-                  ) : connection.status === 'skill-swap' ? (
-                    <Button size="sm" variant="outline">
-                      <Handshake className="w-4 h-4 mr-1" />
-                      Skill Swap
-                    </Button>
-                  ) : (
-                    <Dialog open={showDealDemo && selectedConnection === connection.id} onOpenChange={(open) => {
-                      setShowDealDemo(open);
-                      if (!open) setSelectedConnection(null);
-                    }}>
-                      <DialogTrigger asChild>
-                        <Button 
-                          size="sm" 
-                          onClick={() => handleConnect(connection.id)}
-                          className="bg-blue-500 hover:bg-blue-600"
-                        >
-                          <Users className="w-4 h-4 mr-1" />
-                          Connect
-                        </Button>
-                      </DialogTrigger>
-                      <DialogContent className="max-w-md">
-                        <DialogHeader>
-                          <DialogTitle>Deal Making Process</DialogTitle>
-                        </DialogHeader>
-                        {renderDealStep()}
-                      </DialogContent>
-                    </Dialog>
-                  )}
+                  <p className="text-2xl font-bold">{allUsers.length}</p>
+                  <p className="text-sm opacity-90">Total Users</p>
                 </div>
               </div>
             </CardContent>
           </Card>
-        ))}
-      </div>
-
-      {/* Demo Smart Contract Section */}
-      <Card className="bg-gradient-to-r from-purple-50 to-pink-50 border-purple-200">
-        <CardHeader>
-          <CardTitle className="flex items-center">
-            <span className="mr-2">🔒</span>
-            Smart Contract Demo
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <p className="text-sm text-gray-700">
-              Your deal with <strong>Meera Textiles</strong> is secured by our blockchain-based smart contract:
-            </p>
-            <div className="bg-white p-4 rounded-lg border border-purple-200">
-              <div className="grid grid-cols-2 gap-4 text-sm">
+          
+          <Card className="bg-gradient-to-r from-blue-500 to-blue-600 text-white border-0">
+            <CardContent className="p-4">
+              <div className="flex items-center space-x-3">
+                <Handshake className="w-8 h-8" />
                 <div>
-                  <p className="font-medium">Contract Address:</p>
-                  <p className="text-purple-600 font-mono">0x742d35Cc6635C0532925a3b8D...</p>
-                </div>
-                <div>
-                  <p className="font-medium">Status:</p>
-                  <Badge className="bg-green-100 text-green-800">Active & Secured</Badge>
-                </div>
-                <div>
-                  <p className="font-medium">Material:</p>
-                  <p>5kg Cotton Fabric Scraps</p>
-                </div>
-                <div>
-                  <p className="font-medium">Payment:</p>
-                  <p>₹750 (Auto-release on delivery)</p>
+                  <p className="text-2xl font-bold">{existingConnections.length}</p>
+                  <p className="text-sm opacity-90">Connections</p>
                 </div>
               </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Main Content Tabs */}
+        <Tabs defaultValue="discover" className="space-y-6">
+          <TabsList className="grid w-full grid-cols-2 bg-white/80 backdrop-blur-sm">
+            <TabsTrigger value="discover" className="text-lg font-semibold">
+              <Users className="w-5 h-5 mr-2" />
+              Discover Users
+            </TabsTrigger>
+            <TabsTrigger value="connections" className="text-lg font-semibold">
+              <Handshake className="w-5 h-5 mr-2" />
+              My Connections
+            </TabsTrigger>
+          </TabsList>
+
+          {/* Discover Users Tab */}
+          <TabsContent value="discover" className="space-y-6">
+            {/* Search and Filter */}
+            <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
+              <CardContent className="p-6">
+                <div className="flex flex-col lg:flex-row gap-4">
+                  <div className="flex-1 relative">
+                    <Search className="absolute left-3 top-3 h-5 w-5 text-gray-400" />
+                    <Input
+                      placeholder="Search by name, organization, or interests..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-10 h-12 text-lg"
+                    />
+                  </div>
+                  <Select value={filter} onValueChange={setFilter}>
+                    <SelectTrigger className="w-full lg:w-[200px] h-12">
+                      <SelectValue placeholder="Filter by type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Users</SelectItem>
+                      <SelectItem value="individual">Individuals</SelectItem>
+                      <SelectItem value="organization">Organizations</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Users Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {loading ? (
+                <div className="col-span-full flex justify-center py-12">
+                  <div className="text-center">
+                    <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4 text-green-500" />
+                    <p className="text-gray-600">Loading users...</p>
+                  </div>
+                </div>
+              ) : filteredUsers.length > 0 ? (
+                filteredUsers.map(user => (
+                  <Card key={user._id} className="bg-white/80 backdrop-blur-sm border-0 shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105">
+                    <CardHeader className="pb-4">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center space-x-4">
+                          <Avatar className="w-16 h-16 border-4 border-green-100">
+                            <AvatarImage src={user.avatar} />
+                            <AvatarFallback className="bg-gradient-to-r from-green-400 to-blue-400 text-white text-xl font-bold">
+                              {user.firstName?.[0]}{user.lastName?.[0]}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="flex-1">
+                            <CardTitle className="text-xl mb-1">{user.firstName} {user.lastName}</CardTitle>
+                            <div className="flex items-center space-x-2 mb-2">
+                              <Badge variant="outline" className="text-xs">
+                                {user.userType}
+                              </Badge>
+                              {user.organization && (
+                                <Badge variant="secondary" className="text-xs">
+                                  {user.organization.name}
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="flex items-center text-sm text-gray-600">
+                              <MapPin className="w-4 h-4 mr-1" />
+                              <span>{user.location || 'Location not specified'}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <Badge 
+                            className={`text-xs ${
+                              user.sustainabilityMetrics?.projectsCompleted > 10 ? 'bg-green-100 text-green-800' :
+                              user.sustainabilityMetrics?.projectsCompleted > 5 ? 'bg-blue-100 text-blue-800' :
+                              'bg-yellow-100 text-yellow-800'
+                            }`}
+                          >
+                            {user.sustainabilityMetrics?.projectsCompleted || 0} Projects
+                          </Badge>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <p className="text-gray-700 line-clamp-2">{user.bio || 'No bio available'}</p>
+
+                      <div className="flex flex-wrap gap-1">
+                        {user.interests?.slice(0, 3).map((interest: string) => (
+                          <Badge key={interest} variant="secondary" className="text-xs">
+                            {interest}
+                          </Badge>
+                        ))}
+                        {user.interests?.length > 3 && (
+                          <Badge variant="outline" className="text-xs">
+                            +{user.interests.length - 3} more
+                          </Badge>
+                        )}
+                      </div>
+
+                      <div className="flex items-center justify-between pt-2">
+                        <div>
+                          <p className="text-sm font-medium text-green-600">
+                            {user.sustainabilityMetrics?.carbonFootprint ? 
+                              `${user.sustainabilityMetrics.carbonFootprint}kg CO₂ saved` : 
+                              'Active in sustainability'
+                            }
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            Member since {new Date(user.createdAt).getFullYear()}
+                          </p>
+                        </div>
+                        <div className="flex space-x-2">
+                          {user.connectionStatus === 'pending' ? (
+                            <Button size="sm" variant="outline" disabled className="bg-green-50 text-green-700 border-green-200">
+                              <CheckCircle className="w-4 h-4 mr-1" />
+                              Request Sent
+                            </Button>
+                          ) : (
+                            <Button 
+                              size="sm" 
+                              onClick={() => handleConnect(user._id)}
+                              className="bg-gradient-to-r from-green-500 to-blue-500 hover:from-green-600 hover:to-blue-600 text-white"
+                            >
+                              <UserPlus className="w-4 h-4 mr-1" />
+                              Connect
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))
+              ) : (
+                <div className="col-span-full text-center py-12">
+                  <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Search className="w-12 h-12 text-gray-400" />
+                  </div>
+                  <h3 className="text-xl font-semibold text-gray-900 mb-2">No users found</h3>
+                  <p className="text-gray-600">Try adjusting your search or filters to find more users.</p>
+                </div>
+              )}
             </div>
-            <p className="text-xs text-gray-600">
-              ✓ Fraud protection ✓ Automatic payment release ✓ Dispute resolution
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+          </TabsContent>
+
+          {/* My Connections Tab */}
+          <TabsContent value="connections" className="space-y-6">
+            {existingConnections.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {existingConnections.map(connection => {
+                  const otherUser = connection.requester._id === currentUser?._id ? connection.recipient : connection.requester;
+                  const isRequester = connection.requester._id === currentUser?._id;
+                  
+                  return (
+                    <Card key={connection._id} className="bg-white/80 backdrop-blur-sm border-0 shadow-lg hover:shadow-xl transition-all duration-300">
+                      <CardHeader className="pb-4">
+                        <div className="flex items-center space-x-4">
+                          <Avatar className="w-16 h-16 border-4 border-blue-100">
+                            <AvatarImage src={otherUser.avatar} />
+                            <AvatarFallback className="bg-gradient-to-r from-blue-400 to-purple-400 text-white text-xl font-bold">
+                              {otherUser.firstName?.[0]}{otherUser.lastName?.[0]}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="flex-1">
+                            <CardTitle className="text-xl mb-1">{otherUser.firstName} {otherUser.lastName}</CardTitle>
+                            <div className="flex items-center space-x-2 mb-2">
+                              <Badge variant="outline" className="text-xs">
+                                {otherUser.userType}
+                              </Badge>
+                              {otherUser.organization && (
+                                <Badge variant="secondary" className="text-xs">
+                                  {otherUser.organization.name}
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <Badge className={`text-xs ${
+                                connection.status === 'accepted' ? 'bg-green-100 text-green-800' :
+                                connection.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                                'bg-gray-100 text-gray-800'
+                              }`}>
+                                {connection.status}
+                              </Badge>
+                              <Badge variant="outline" className="text-xs">
+                                {isRequester ? 'You sent request' : 'They sent request'}
+                              </Badge>
+                            </div>
+                          </div>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="flex items-center text-sm text-gray-600">
+                          <MapPin className="w-4 h-4 mr-1" />
+                          <span>{otherUser.location || 'Location not specified'}</span>
+                        </div>
+
+                        <p className="text-gray-700 line-clamp-2">{otherUser.bio || 'No bio available'}</p>
+
+                        <div className="flex flex-wrap gap-1">
+                          {otherUser.interests?.slice(0, 3).map((interest: string) => (
+                            <Badge key={interest} variant="secondary" className="text-xs">
+                              {interest}
+                            </Badge>
+                          ))}
+                        </div>
+
+                        {/* Connection Details */}
+                        <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
+                          <div className="space-y-2 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-gray-600">Connection Type:</span>
+                              <span className="font-medium">{connection.collaborationType || 'Partnership'}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-600">Project Interest:</span>
+                              <span className="font-medium">{connection.projectInterest || 'General'}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-600">Connected Since:</span>
+                              <span className="font-medium">{new Date(connection.createdAt).toLocaleDateString()}</span>
+                            </div>
+                            {connection.message && (
+                              <div className="mt-2 p-2 bg-white rounded border">
+                                <span className="text-xs text-gray-500">Message:</span>
+                                <p className="text-sm text-gray-700 mt-1">{connection.message}</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-2">
+                          <div className="flex space-x-2">
+                            {connection.status === 'pending' && !isRequester && (
+                              <Button 
+                                size="sm" 
+                                className="bg-green-500 hover:bg-green-600 text-white"
+                                onClick={() => handleAcceptConnection(connection._id)}
+                              >
+                                <CheckCircle className="w-4 h-4 mr-1" />
+                                Accept
+                              </Button>
+                            )}
+                            {connection.status === 'pending' && (
+                              <Button 
+                                size="sm" 
+                                variant="outline" 
+                                className="text-red-600 border-red-200 hover:bg-red-50"
+                                onClick={() => handleRejectConnection(connection._id)}
+                              >
+                                Reject
+                              </Button>
+                            )}
+                          </div>
+                          <div className="flex space-x-2">
+                            <Button size="sm" variant="outline">
+                              <MessageCircle className="w-4 h-4 mr-1" />
+                              Message
+                            </Button>
+                            {connection.status === 'accepted' && (
+                              <Button size="sm" className="bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white">
+                                <Handshake className="w-4 h-4 mr-1" />
+                                Collaborate
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            ) : (
+              <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
+                <CardContent className="p-12 text-center">
+                  <div className="w-24 h-24 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <Handshake className="w-12 h-12 text-blue-500" />
+                  </div>
+                  <h3 className="text-2xl font-semibold text-gray-900 mb-3">No Connections Yet</h3>
+                  <p className="text-gray-600 mb-6 max-w-md mx-auto">
+                    Start building your sustainable network by connecting with other users. 
+                    Discover potential collaborators and partners for your eco-friendly projects.
+                  </p>
+                  <Button 
+                    onClick={() => {
+                      const discoverTab = document.querySelector('[data-value="discover"]') as HTMLElement;
+                      if (discoverTab) discoverTab.click();
+                    }}
+                    className="bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white"
+                  >
+                    <Users className="w-5 h-5 mr-2" />
+                    Discover Users
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+        </Tabs>
+      </div>
     </div>
   );
 };

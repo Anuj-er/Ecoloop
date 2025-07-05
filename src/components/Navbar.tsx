@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/contexts/AuthContext";
 import { User, Globe, BarChart3, MessageCircle, Users, Menu, Home, LogOut } from "lucide-react";
+import { NotificationBell } from "./NotificationBell";
 
 interface NavbarProps {
   onSectionChange: (section: string) => void;
@@ -107,6 +108,11 @@ export const Navbar = ({ onSectionChange, currentSection }: NavbarProps) => {
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
+
+            {/* Notification Bell */}
+            {isAuthenticated && (
+              <NotificationBell className="mr-2" />
+            )}
 
             {/* Authentication Buttons */}
             {isAuthenticated ? (
