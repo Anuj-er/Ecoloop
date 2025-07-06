@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { MapPin, Star, Users, Handshake, Package, Search, Truck, MessageCircle, CheckCircle, ArrowRight, Loader2, UserPlus, LogIn, Heart, Calendar, TrendingUp, Globe } from "lucide-react";
+import { MapPin, Star, Users, Handshake, Package, Search, Truck, MessageCircle, CheckCircle, ArrowRight, Loader2, UserPlus, LogIn, Heart, Calendar, TrendingUp, Globe, RefreshCw, Clock } from "lucide-react";
 import { connectionsAPI, usersAPI } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
@@ -22,6 +22,9 @@ export const Connect = () => {
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [existingConnections, setExistingConnections] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
+  const [processingConnections, setProcessingConnections] = useState<Set<string>>(new Set());
   const { toast } = useToast();
   const { user: currentUser, isAuthenticated, isLoading } = useAuth();
 
@@ -32,6 +35,51 @@ export const Connect = () => {
       loadExistingConnections();
     }
   }, [isAuthenticated, isLoading]);
+
+  // Set up real-time polling for new users and connections
+  useEffect(() => {
+    if (!isAuthenticated || isLoading) return;
+
+    // Refresh data when user returns to the tab
+    const handleVisibilityChange = () => {
+      if (!document.hidden && isAuthenticated) {
+        refreshData();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [isAuthenticated, isLoading]);
+
+  const refreshData = async () => {
+    if (refreshing) return; // Prevent multiple simultaneous refreshes
+    
+    setRefreshing(true);
+    
+    try {
+      await Promise.all([
+        loadAllUsers(),
+        loadExistingConnections()
+      ]);
+      
+      setLastRefresh(new Date());
+    } catch (error) {
+      console.error('Failed to refresh data:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleManualRefresh = async () => {
+    await refreshData();
+    toast({
+      title: "Data refreshed!",
+      description: "Latest users and connections have been loaded.",
+    });
+  };
 
   const loadAllUsers = async () => {
     if (!isAuthenticated) {
@@ -73,29 +121,63 @@ export const Connect = () => {
     
     try {
       const response = await connectionsAPI.getConnections();
-      setExistingConnections(response.data.data || []);
+      const connections = response.data.data || [];
+      
+      // Sort connections: accepted first, then pending, then others
+      const sortedConnections = connections.sort((a: any, b: any) => {
+        if (a.status === 'accepted' && b.status !== 'accepted') return -1;
+        if (a.status !== 'accepted' && b.status === 'accepted') return 1;
+        if (a.status === 'pending' && b.status !== 'pending') return -1;
+        if (a.status !== 'pending' && b.status === 'pending') return 1;
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      });
+      
+      setExistingConnections(sortedConnections);
     } catch (error) {
       console.error("Failed to load connections:", error);
     }
   };
 
-  // Get connected user IDs to filter them out
+  // Get connected user IDs to filter them out (only accepted connections)
   const getConnectedUserIds = () => {
-    return existingConnections.map(conn => {
-      // Determine which user is the other party in the connection
-      return conn.requester._id === currentUser?._id ? conn.recipient._id : conn.requester._id;
-    });
+    return existingConnections
+      .filter(conn => conn.status === 'accepted') // Only consider accepted connections
+      .map(conn => {
+        // Determine which user is the other party in the connection
+        return conn.requester._id === currentUser?._id ? conn.recipient._id : conn.requester._id;
+      });
+  };
+
+  // Get pending connection user IDs (for showing "Request Sent" status)
+  const getPendingConnectionUserIds = () => {
+    return existingConnections
+      .filter(conn => conn.status === 'pending')
+      .map(conn => {
+        // Only show "Request Sent" if current user is the requester
+        if (conn.requester._id === currentUser?._id) {
+          return conn.recipient._id;
+        }
+        return null;
+      })
+      .filter(id => id !== null);
   };
 
   // Filter users to show only those we can connect with
   const getAvailableUsers = () => {
     const connectedUserIds = getConnectedUserIds();
+    const pendingUserIds = getPendingConnectionUserIds();
     
     return allUsers.filter(user => 
       user._id !== currentUser?._id && // Don't show current user
       !connectedUserIds.includes(user._id) && // Don't show already connected users
       user.isActive !== false // Only show active users
-    );
+    ).map(user => {
+      // Add connection status for UI display
+      if (pendingUserIds.includes(user._id)) {
+        return { ...user, connectionStatus: 'pending' };
+      }
+      return user;
+    });
   };
 
   const filteredUsers = getAvailableUsers().filter(user => {
@@ -122,6 +204,9 @@ export const Connect = () => {
       return;
     }
 
+    // Add to processing set
+    setProcessingConnections(prev => new Set(prev).add(userId));
+
     try {
       await connectionsAPI.sendRequest({
         recipientId: userId,
@@ -135,52 +220,147 @@ export const Connect = () => {
         description: "The user will be notified of your request.",
       });
 
-      // Update the user status to show request sent
+      // Update the user status to show request sent immediately
       setAllUsers(prev => prev.map(user => 
         user._id === userId ? { ...user, connectionStatus: 'pending' } : user
       ));
+      
+      // Refresh connections to show the new pending request
+      await loadExistingConnections();
+      
+      // Update the stats immediately
+      setLastRefresh(new Date());
     } catch (error: any) {
       toast({
         title: "Failed to send request",
         description: error.response?.data?.message || "Something went wrong",
         variant: "destructive",
       });
+    } finally {
+      // Remove from processing set
+      setProcessingConnections(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(userId);
+        return newSet;
+      });
     }
   };
 
   const handleAcceptConnection = async (connectionId: string) => {
+    // Add to processing set
+    setProcessingConnections(prev => new Set(prev).add(connectionId));
+
     try {
-      await connectionsAPI.acceptConnection(connectionId);
+      const response = await connectionsAPI.acceptConnection(connectionId);
+      
       toast({
         title: "Connection accepted!",
         description: "You are now connected with this user.",
       });
-      loadExistingConnections(); // Refresh connections
+      
+      // Update the connection in the existing connections list immediately
+      setExistingConnections(prev => {
+        const updatedConnections = prev.map(conn => 
+          conn._id === connectionId 
+            ? { ...conn, status: 'accepted', ...response.data.data.connection }
+            : conn
+        );
+        
+        // Sort connections: accepted first, then pending, then others
+        return updatedConnections.sort((a: any, b: any) => {
+          if (a.status === 'accepted' && b.status !== 'accepted') return -1;
+          if (a.status !== 'accepted' && b.status === 'accepted') return 1;
+          if (a.status === 'pending' && b.status !== 'pending') return -1;
+          if (a.status !== 'pending' && b.status === 'pending') return 1;
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        });
+      });
+      
+      // Refresh users data to remove the accepted user from discover tab
+      await loadAllUsers();
+      
+      // Update the stats immediately
+      setLastRefresh(new Date());
+      
+      // Show additional success message with connection count
+      if (response.data.data.connectionCounts) {
+        const { recipient } = response.data.data.connectionCounts;
+        toast({
+          title: "Connection updated!",
+          description: `You now have ${recipient} total connections.`,
+        });
+      }
     } catch (error: any) {
       toast({
         title: "Failed to accept connection",
         description: error.response?.data?.message || "Something went wrong",
         variant: "destructive",
       });
+    } finally {
+      // Remove from processing set
+      setProcessingConnections(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(connectionId);
+        return newSet;
+      });
     }
   };
 
   const handleRejectConnection = async (connectionId: string) => {
+    // Add to processing set
+    setProcessingConnections(prev => new Set(prev).add(connectionId));
+
     try {
-      await connectionsAPI.rejectConnection(connectionId);
+      const response = await connectionsAPI.rejectConnection(connectionId);
+      
       toast({
         title: "Connection rejected",
         description: "The connection request has been rejected.",
       });
-      loadExistingConnections(); // Refresh connections
+      
+      // Update the connection in the existing connections list
+      setExistingConnections(prev => 
+        prev.map(conn => 
+          conn._id === connectionId 
+            ? { ...conn, status: 'rejected', ...response.data.data.connection }
+            : conn
+        )
+      );
+      
+      // Refresh both connections and users data for real-time updates
+      await Promise.all([
+        loadExistingConnections(),
+        loadAllUsers()
+      ]);
+      
+      // Update the stats immediately
+      setLastRefresh(new Date());
+      
+      // Show additional success message with connection count
+      if (response.data.data.connectionCounts) {
+        const { recipient } = response.data.data.connectionCounts;
+        toast({
+          title: "Connection updated!",
+          description: `You now have ${recipient} total connections.`,
+        });
+      }
     } catch (error: any) {
       toast({
         title: "Failed to reject connection",
         description: error.response?.data?.message || "Something went wrong",
         variant: "destructive",
       });
+    } finally {
+      // Remove from processing set
+      setProcessingConnections(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(connectionId);
+        return newSet;
+      });
     }
   };
+
+
 
   // Login Prompt for Unauthenticated Users
   if (!isAuthenticated && !isLoading) {
@@ -235,9 +415,17 @@ export const Connect = () => {
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header Section */}
         <div className="text-center space-y-4">
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-green-600 to-blue-600 bg-clip-text text-transparent">
-            Connect & Collaborate
-          </h1>
+          <div className="flex items-center justify-center space-x-3">
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-green-600 to-blue-600 bg-clip-text text-transparent">
+              Connect & Collaborate
+            </h1>
+            <div className="flex items-center space-x-2">
+              <div className={`w-2 h-2 rounded-full ${refreshing ? 'bg-yellow-500 animate-pulse' : 'bg-green-500'}`}></div>
+              <span className="text-sm text-gray-600">
+                {refreshing ? 'Updating...' : 'Live'}
+              </span>
+            </div>
+          </div>
           <p className="text-xl text-gray-600 max-w-2xl mx-auto">
             Discover sustainability enthusiasts, organizations, and businesses to build meaningful partnerships
           </p>
@@ -308,6 +496,17 @@ export const Connect = () => {
                       <SelectItem value="organization">Organizations</SelectItem>
                     </SelectContent>
                   </Select>
+                  <Button
+                    onClick={handleManualRefresh}
+                    disabled={refreshing}
+                    className="bg-gradient-to-r from-green-500 to-blue-500 hover:from-green-600 hover:to-blue-600 text-white h-12 px-6"
+                  >
+                    <RefreshCw className={`w-4 h-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+                    {refreshing ? 'Refreshing...' : 'Refresh'}
+                  </Button>
+                </div>
+                <div className="mt-3 text-sm text-gray-500">
+                  <span>Showing {filteredUsers.length} available users</span>
                 </div>
               </CardContent>
             </Card>
@@ -342,6 +541,12 @@ export const Connect = () => {
                               {user.organization && (
                                 <Badge variant="secondary" className="text-xs">
                                   {user.organization.name}
+                                </Badge>
+                              )}
+                              {/* Show "New" badge for users registered in the last 24 hours */}
+                              {new Date(user.createdAt) > new Date(Date.now() - 24 * 60 * 60 * 1000) && (
+                                <Badge className="bg-green-100 text-green-800 text-xs animate-pulse">
+                                  New
                                 </Badge>
                               )}
                             </div>
@@ -402,10 +607,20 @@ export const Connect = () => {
                             <Button 
                               size="sm" 
                               onClick={() => handleConnect(user._id)}
+                              disabled={processingConnections.has(user._id)}
                               className="bg-gradient-to-r from-green-500 to-blue-500 hover:from-green-600 hover:to-blue-600 text-white"
                             >
-                              <UserPlus className="w-4 h-4 mr-1" />
-                              Connect
+                              {processingConnections.has(user._id) ? (
+                                <>
+                                  <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                                  Sending...
+                                </>
+                              ) : (
+                                <>
+                                  <UserPlus className="w-4 h-4 mr-1" />
+                                  Connect
+                                </>
+                              )}
                             </Button>
                           )}
                         </div>
@@ -428,128 +643,248 @@ export const Connect = () => {
           {/* My Connections Tab */}
           <TabsContent value="connections" className="space-y-6">
             {existingConnections.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {existingConnections.map(connection => {
-                  const otherUser = connection.requester._id === currentUser?._id ? connection.recipient : connection.requester;
-                  const isRequester = connection.requester._id === currentUser?._id;
-                  
-                  return (
-                    <Card key={connection._id} className="bg-white/80 backdrop-blur-sm border-0 shadow-lg hover:shadow-xl transition-all duration-300">
-                      <CardHeader className="pb-4">
-                        <div className="flex items-center space-x-4">
-                          <Avatar className="w-16 h-16 border-4 border-blue-100">
-                            <AvatarImage src={otherUser.avatar} />
-                            <AvatarFallback className="bg-gradient-to-r from-blue-400 to-purple-400 text-white text-xl font-bold">
-                              {otherUser.firstName?.[0]}{otherUser.lastName?.[0]}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="flex-1">
-                            <CardTitle className="text-xl mb-1">{otherUser.firstName} {otherUser.lastName}</CardTitle>
-                            <div className="flex items-center space-x-2 mb-2">
-                              <Badge variant="outline" className="text-xs">
-                                {otherUser.userType}
-                              </Badge>
-                              {otherUser.organization && (
-                                <Badge variant="secondary" className="text-xs">
-                                  {otherUser.organization.name}
-                                </Badge>
-                              )}
-                            </div>
-                            <div className="flex items-center space-x-2">
-                              <Badge className={`text-xs ${
-                                connection.status === 'accepted' ? 'bg-green-100 text-green-800' :
-                                connection.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                                'bg-gray-100 text-gray-800'
-                              }`}>
-                                {connection.status}
-                              </Badge>
-                              <Badge variant="outline" className="text-xs">
-                                {isRequester ? 'You sent request' : 'They sent request'}
-                              </Badge>
-                            </div>
-                          </div>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="space-y-4">
-                        <div className="flex items-center text-sm text-gray-600">
-                          <MapPin className="w-4 h-4 mr-1" />
-                          <span>{otherUser.location || 'Location not specified'}</span>
-                        </div>
+              <div className="space-y-8">
+                {/* Accepted Connections */}
+                {existingConnections.filter(conn => conn.status === 'accepted').length > 0 && (
+                  <div>
+                    <h3 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
+                      <CheckCircle className="w-5 h-5 mr-2 text-green-500" />
+                      Accepted Connections ({existingConnections.filter(conn => conn.status === 'accepted').length})
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {existingConnections
+                        .filter(connection => connection.status === 'accepted')
+                        .map(connection => {
+                          const otherUser = connection.requester._id === currentUser?._id ? connection.recipient : connection.requester;
+                          const isRequester = connection.requester._id === currentUser?._id;
+                          
+                          return (
+                            <Card key={connection._id} className="bg-white/80 backdrop-blur-sm border-0 shadow-lg hover:shadow-xl transition-all duration-300 border-l-4 border-l-green-500">
+                              <CardHeader className="pb-4">
+                                <div className="flex items-center space-x-4">
+                                  <Avatar className="w-16 h-16 border-4 border-green-100">
+                                    <AvatarImage src={otherUser.avatar} />
+                                    <AvatarFallback className="bg-gradient-to-r from-green-400 to-blue-400 text-white text-xl font-bold">
+                                      {otherUser.firstName?.[0]}{otherUser.lastName?.[0]}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                  <div className="flex-1">
+                                    <CardTitle className="text-xl mb-1">{otherUser.firstName} {otherUser.lastName}</CardTitle>
+                                    <div className="flex items-center space-x-2 mb-2">
+                                      <Badge variant="outline" className="text-xs">
+                                        {otherUser.userType}
+                                      </Badge>
+                                      {otherUser.organization && (
+                                        <Badge variant="secondary" className="text-xs">
+                                          {otherUser.organization.name}
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                      <Badge className="bg-green-100 text-green-800 text-xs">
+                                        Connected
+                                      </Badge>
+                                      <Badge variant="outline" className="text-xs">
+                                        {isRequester ? 'You sent request' : 'They sent request'}
+                                      </Badge>
+                                    </div>
+                                  </div>
+                                </div>
+                              </CardHeader>
+                              <CardContent className="space-y-4">
+                                <div className="flex items-center text-sm text-gray-600">
+                                  <MapPin className="w-4 h-4 mr-1" />
+                                  <span>{otherUser.location || 'Location not specified'}</span>
+                                </div>
 
-                        <p className="text-gray-700 line-clamp-2">{otherUser.bio || 'No bio available'}</p>
+                                <p className="text-gray-700 line-clamp-2">{otherUser.bio || 'No bio available'}</p>
 
-                        <div className="flex flex-wrap gap-1">
-                          {otherUser.interests?.slice(0, 3).map((interest: string) => (
-                            <Badge key={interest} variant="secondary" className="text-xs">
-                              {interest}
-                            </Badge>
-                          ))}
-                        </div>
+                                <div className="flex flex-wrap gap-1">
+                                  {otherUser.interests?.slice(0, 3).map((interest: string) => (
+                                    <Badge key={interest} variant="secondary" className="text-xs">
+                                      {interest}
+                                    </Badge>
+                                  ))}
+                                </div>
 
-                        {/* Connection Details */}
-                        <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
-                          <div className="space-y-2 text-sm">
-                            <div className="flex justify-between">
-                              <span className="text-gray-600">Connection Type:</span>
-                              <span className="font-medium">{connection.collaborationType || 'Partnership'}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-gray-600">Project Interest:</span>
-                              <span className="font-medium">{connection.projectInterest || 'General'}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-gray-600">Connected Since:</span>
-                              <span className="font-medium">{new Date(connection.createdAt).toLocaleDateString()}</span>
-                            </div>
-                            {connection.message && (
-                              <div className="mt-2 p-2 bg-white rounded border">
-                                <span className="text-xs text-gray-500">Message:</span>
-                                <p className="text-sm text-gray-700 mt-1">{connection.message}</p>
-                              </div>
-                            )}
-                          </div>
-                        </div>
+                                {/* Connection Details */}
+                                <div className="bg-green-50 p-3 rounded-lg border border-green-200">
+                                  <div className="space-y-2 text-sm">
+                                    <div className="flex justify-between">
+                                      <span className="text-gray-600">Connection Type:</span>
+                                      <span className="font-medium">{connection.collaborationType || 'Partnership'}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-gray-600">Project Interest:</span>
+                                      <span className="font-medium">{connection.projectInterest || 'General'}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-gray-600">Connected Since:</span>
+                                      <span className="font-medium">{new Date(connection.createdAt).toLocaleDateString()}</span>
+                                    </div>
+                                    {connection.message && (
+                                      <div className="mt-2 p-2 bg-white rounded border">
+                                        <span className="text-xs text-gray-500">Message:</span>
+                                        <p className="text-sm text-gray-700 mt-1">{connection.message}</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
 
-                        <div className="flex items-center justify-between pt-2">
-                          <div className="flex space-x-2">
-                            {connection.status === 'pending' && !isRequester && (
-                              <Button 
-                                size="sm" 
-                                className="bg-green-500 hover:bg-green-600 text-white"
-                                onClick={() => handleAcceptConnection(connection._id)}
-                              >
-                                <CheckCircle className="w-4 h-4 mr-1" />
-                                Accept
-                              </Button>
-                            )}
-                            {connection.status === 'pending' && (
-                              <Button 
-                                size="sm" 
-                                variant="outline" 
-                                className="text-red-600 border-red-200 hover:bg-red-50"
-                                onClick={() => handleRejectConnection(connection._id)}
-                              >
-                                Reject
-                              </Button>
-                            )}
-                          </div>
-                          <div className="flex space-x-2">
-                            <Button size="sm" variant="outline">
-                              <MessageCircle className="w-4 h-4 mr-1" />
-                              Message
-                            </Button>
-                            {connection.status === 'accepted' && (
-                              <Button size="sm" className="bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white">
-                                <Handshake className="w-4 h-4 mr-1" />
-                                Collaborate
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
+                                <div className="flex items-center justify-between pt-2">
+                                  <div className="flex space-x-2">
+                                    <Button size="sm" variant="outline">
+                                      <MessageCircle className="w-4 h-4 mr-1" />
+                                      Message
+                                    </Button>
+                                    <Button size="sm" className="bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white">
+                                      <Handshake className="w-4 h-4 mr-1" />
+                                      Collaborate
+                                    </Button>
+                                  </div>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          );
+                        })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Pending Connections */}
+                {existingConnections.filter(conn => conn.status === 'pending').length > 0 && (
+                  <div>
+                    <h3 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
+                      <Clock className="w-5 h-5 mr-2 text-yellow-500" />
+                      Pending Connections ({existingConnections.filter(conn => conn.status === 'pending').length})
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {existingConnections
+                        .filter(connection => connection.status === 'pending')
+                        .map(connection => {
+                          const otherUser = connection.requester._id === currentUser?._id ? connection.recipient : connection.requester;
+                          const isRequester = connection.requester._id === currentUser?._id;
+                          
+                          return (
+                            <Card key={connection._id} className="bg-white/80 backdrop-blur-sm border-0 shadow-lg hover:shadow-xl transition-all duration-300 border-l-4 border-l-yellow-500">
+                              <CardHeader className="pb-4">
+                                <div className="flex items-center space-x-4">
+                                  <Avatar className="w-16 h-16 border-4 border-yellow-100">
+                                    <AvatarImage src={otherUser.avatar} />
+                                    <AvatarFallback className="bg-gradient-to-r from-yellow-400 to-orange-400 text-white text-xl font-bold">
+                                      {otherUser.firstName?.[0]}{otherUser.lastName?.[0]}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                  <div className="flex-1">
+                                    <CardTitle className="text-xl mb-1">{otherUser.firstName} {otherUser.lastName}</CardTitle>
+                                    <div className="flex items-center space-x-2 mb-2">
+                                      <Badge variant="outline" className="text-xs">
+                                        {otherUser.userType}
+                                      </Badge>
+                                      {otherUser.organization && (
+                                        <Badge variant="secondary" className="text-xs">
+                                          {otherUser.organization.name}
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                      <Badge className="bg-yellow-100 text-yellow-800 text-xs">
+                                        Pending
+                                      </Badge>
+                                      <Badge variant="outline" className="text-xs">
+                                        {isRequester ? 'You sent request' : 'They sent request'}
+                                      </Badge>
+                                    </div>
+                                  </div>
+                                </div>
+                              </CardHeader>
+                              <CardContent className="space-y-4">
+                                <div className="flex items-center text-sm text-gray-600">
+                                  <MapPin className="w-4 h-4 mr-1" />
+                                  <span>{otherUser.location || 'Location not specified'}</span>
+                                </div>
+
+                                <p className="text-gray-700 line-clamp-2">{otherUser.bio || 'No bio available'}</p>
+
+                                <div className="flex flex-wrap gap-1">
+                                  {otherUser.interests?.slice(0, 3).map((interest: string) => (
+                                    <Badge key={interest} variant="secondary" className="text-xs">
+                                      {interest}
+                                    </Badge>
+                                  ))}
+                                </div>
+
+                                {/* Connection Details */}
+                                <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200">
+                                  <div className="space-y-2 text-sm">
+                                    <div className="flex justify-between">
+                                      <span className="text-gray-600">Connection Type:</span>
+                                      <span className="font-medium">{connection.collaborationType || 'Partnership'}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-gray-600">Project Interest:</span>
+                                      <span className="font-medium">{connection.projectInterest || 'General'}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-gray-600">Requested On:</span>
+                                      <span className="font-medium">{new Date(connection.createdAt).toLocaleDateString()}</span>
+                                    </div>
+                                    {connection.message && (
+                                      <div className="mt-2 p-2 bg-white rounded border">
+                                        <span className="text-xs text-gray-500">Message:</span>
+                                        <p className="text-sm text-gray-700 mt-1">{connection.message}</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center justify-between pt-2">
+                                  <div className="flex space-x-2">
+                                    {!isRequester && (
+                                      <Button 
+                                        size="sm" 
+                                        className="bg-green-500 hover:bg-green-600 text-white"
+                                        onClick={() => handleAcceptConnection(connection._id)}
+                                        disabled={processingConnections.has(connection._id)}
+                                      >
+                                        {processingConnections.has(connection._id) ? (
+                                          <>
+                                            <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                                            Accepting...
+                                          </>
+                                        ) : (
+                                          <>
+                                            <CheckCircle className="w-4 h-4 mr-1" />
+                                            Accept
+                                          </>
+                                        )}
+                                      </Button>
+                                    )}
+                                    <Button 
+                                      size="sm" 
+                                      variant="outline" 
+                                      className="text-red-600 border-red-200 hover:bg-red-50"
+                                      onClick={() => handleRejectConnection(connection._id)}
+                                      disabled={processingConnections.has(connection._id)}
+                                    >
+                                      {processingConnections.has(connection._id) ? (
+                                        <>
+                                          <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                                          Rejecting...
+                                        </>
+                                      ) : (
+                                        'Reject'
+                                      )}
+                                    </Button>
+                                  </div>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          );
+                        })}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">

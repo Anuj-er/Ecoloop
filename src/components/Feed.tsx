@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CreatePostModal } from "./CreatePostModal";
 import { useAuth } from "@/contexts/AuthContext";
@@ -22,7 +23,9 @@ import {
   MapPin,
   Calendar,
   Eye,
-  Trash2
+  Trash2,
+  Send,
+  X
 } from "lucide-react";
 
 export const Feed = () => {
@@ -34,6 +37,8 @@ export const Feed = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [postToDelete, setPostToDelete] = useState<any>(null);
+  const [commentInputs, setCommentInputs] = useState<{ [key: string]: string }>({});
+  const [showComments, setShowComments] = useState<{ [key: string]: boolean }>({});
   const [filters, setFilters] = useState({
     category: "all",
     search: "",
@@ -79,7 +84,28 @@ export const Feed = () => {
   const handlePostLike = async (postId: string) => {
     try {
       await postsAPI.likePost(postId);
-      loadPosts();
+      // Update local state instead of reloading all posts
+      setPosts(prevPosts => 
+        prevPosts.map(post => {
+          if (post._id === postId) {
+            const isLiked = post.likes?.some((like: any) => like._id === user?._id);
+            if (isLiked) {
+              // Unlike: remove user from likes array
+              return {
+                ...post,
+                likes: post.likes?.filter((like: any) => like._id !== user?._id) || []
+              };
+            } else {
+              // Like: add user to likes array
+              return {
+                ...post,
+                likes: [...(post.likes || []), user]
+              };
+            }
+          }
+          return post;
+        })
+      );
     } catch (error) {
       toast({
         title: "Error",
@@ -92,11 +118,27 @@ export const Feed = () => {
   const handlePostShare = async (postId: string) => {
     try {
       await postsAPI.sharePost(postId);
+      
+      // Update local state instead of reloading all posts
+      setPosts(prevPosts => 
+        prevPosts.map(post => {
+          if (post._id === postId) {
+            const isShared = post.shares?.some((share: any) => share._id === user?._id);
+            if (!isShared) {
+              return {
+                ...post,
+                shares: [...(post.shares || []), user]
+              };
+            }
+          }
+          return post;
+        })
+      );
+      
       toast({
         title: "Shared!",
         description: "Post shared successfully",
       });
-      loadPosts();
     } catch (error) {
       toast({
         title: "Error",
@@ -175,6 +217,74 @@ export const Feed = () => {
       default:
         return 'bg-gray-100 text-gray-800';
     }
+  };
+
+  const handleAddComment = async (postId: string) => {
+    const content = commentInputs[postId]?.trim();
+    if (!content) return;
+
+    try {
+      const response = await postsAPI.addComment(postId, { content });
+      setCommentInputs(prev => ({ ...prev, [postId]: '' }));
+      
+      // Update local state with the new comment
+      setPosts(prevPosts => 
+        prevPosts.map(post => {
+          if (post._id === postId) {
+            return {
+              ...post,
+              comments: [...(post.comments || []), response.data.data]
+            };
+          }
+          return post;
+        })
+      );
+      
+      toast({
+        title: "Comment added!",
+        description: "Your comment has been posted successfully",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to add comment",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleRemoveComment = async (postId: string, commentId: string) => {
+    try {
+      await postsAPI.removeComment(postId, commentId);
+      
+      // Update local state by removing the comment
+      setPosts(prevPosts => 
+        prevPosts.map(post => {
+          if (post._id === postId) {
+            return {
+              ...post,
+              comments: post.comments?.filter((comment: any) => comment._id !== commentId) || []
+            };
+          }
+          return post;
+        })
+      );
+      
+      toast({
+        title: "Comment removed!",
+        description: "Comment has been deleted successfully",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to remove comment",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const toggleComments = (postId: string) => {
+    setShowComments(prev => ({ ...prev, [postId]: !prev[postId] }));
   };
 
   return (
@@ -386,7 +496,10 @@ export const Feed = () => {
                         <Heart className="w-5 h-5" />
                         <span className="text-sm">{formatNumber(post.likes?.length || 0)}</span>
                       </button>
-                      <button className="flex items-center space-x-2 text-gray-600 hover:text-blue-600 transition-colors">
+                      <button 
+                        onClick={() => toggleComments(post._id)}
+                        className="flex items-center space-x-2 text-gray-600 hover:text-blue-600 transition-colors"
+                      >
                         <MessageCircle className="w-5 h-5" />
                         <span className="text-sm">{formatNumber(post.comments?.length || 0)}</span>
                       </button>
@@ -399,6 +512,90 @@ export const Feed = () => {
                       </button>
                     </div>
                   </div>
+
+                  {/* Comments Section */}
+                  {showComments[post._id] && (
+                    <div className="border-t pt-4 space-y-4">
+                      {/* Comment Input */}
+                      <div className="flex space-x-3">
+                        <Avatar className="w-8 h-8 flex-shrink-0">
+                          <AvatarImage src={user?.avatar} />
+                          <AvatarFallback className="text-xs">
+                            {user?.firstName?.charAt(0) || user?.username?.charAt(0)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="flex-1 flex space-x-2">
+                          <Textarea
+                            placeholder="Write a comment..."
+                            value={commentInputs[post._id] || ''}
+                            onChange={(e) => setCommentInputs(prev => ({ 
+                              ...prev, 
+                              [post._id]: e.target.value 
+                            }))}
+                            className="min-h-[60px] resize-none border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault();
+                                handleAddComment(post._id);
+                              }
+                            }}
+                          />
+                          <Button
+                            onClick={() => handleAddComment(post._id)}
+                            disabled={!commentInputs[post._id]?.trim()}
+                            size="sm"
+                            className="self-end bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                          >
+                            <Send className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+
+                                                    {/* Comments List */}
+                              {post.comments && post.comments.length > 0 ? (
+                                <div className="space-y-3">
+                                  {post.comments.map((comment: any) => (
+                                    <div key={comment._id} className="flex space-x-3 group">
+                                      <Avatar className="w-8 h-8 flex-shrink-0">
+                                        <AvatarImage src={comment.user?.avatar} />
+                                        <AvatarFallback className="text-xs">
+                                          {comment.user?.firstName?.charAt(0) || comment.user?.username?.charAt(0)}
+                                        </AvatarFallback>
+                                      </Avatar>
+                                      <div className="flex-1 min-w-0">
+                                        <div className="bg-gray-50 hover:bg-gray-100 rounded-lg p-3 transition-colors duration-200">
+                                          <div className="flex items-center justify-between mb-2">
+                                            <span className="font-medium text-sm text-gray-900">
+                                              {comment.user?.firstName} {comment.user?.lastName}
+                                            </span>
+                                            <span className="text-xs text-gray-500 flex-shrink-0">
+                                              {formatDate(comment.createdAt)}
+                                            </span>
+                                          </div>
+                                          <p className="text-sm text-gray-700 leading-relaxed">{comment.content}</p>
+                                        </div>
+                                                                        {comment.user?._id === user?._id && (
+                                          <div className="mt-2 flex justify-end">
+                                            <button
+                                              onClick={() => handleRemoveComment(post._id, comment._id)}
+                                              className="inline-flex items-center space-x-1 px-2 py-1 text-xs text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-md transition-all duration-200"
+                                            >
+                                              <X className="w-3 h-3" />
+                                              <span>Delete</span>
+                                            </button>
+                                          </div>
+                                        )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-center py-4 text-gray-500 text-sm">
+                          No comments yet. Be the first to comment!
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             ))}

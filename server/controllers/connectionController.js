@@ -72,7 +72,19 @@ export const sendConnectionRequest = asyncHandler(async (req, res) => {
 // @access  Private
 export const getConnections = asyncHandler(async (req, res) => {
   const { status } = req.query;
-  const connections = await Connection.getUserConnections(req.user._id, status);
+  
+  // If no status is specified, get all connections (pending, accepted, etc.)
+  // If status is specified, filter by that status
+  const connections = status 
+    ? await Connection.getUserConnections(req.user._id, status)
+    : await Connection.find({
+        $or: [
+          { requester: req.user._id },
+          { recipient: req.user._id }
+        ]
+      }).populate('requester', 'username firstName lastName avatar organization')
+        .populate('recipient', 'username firstName lastName avatar organization')
+        .sort({ createdAt: -1 });
 
   res.json({
     success: true,
@@ -102,7 +114,18 @@ export const acceptConnection = asyncHandler(async (req, res) => {
     });
   }
 
+  // Check if connection is already accepted
+  if (connection.status === 'accepted') {
+    return res.status(400).json({
+      success: false,
+      message: 'Connection is already accepted'
+    });
+  }
+
+  // Accept the connection
   await connection.accept();
+  
+  // Populate user details for both requester and recipient
   await connection.populate('requester', 'username firstName lastName avatar organization');
   await connection.populate('recipient', 'username firstName lastName avatar organization');
 
@@ -115,9 +138,33 @@ export const acceptConnection = asyncHandler(async (req, res) => {
     console.error('Error creating acceptance notification:', error);
   }
 
+  // Get updated connection counts for both users
+  const requesterConnections = await Connection.countDocuments({
+    $or: [
+      { requester: connection.requester },
+      { recipient: connection.requester }
+    ],
+    status: 'accepted'
+  });
+
+  const recipientConnections = await Connection.countDocuments({
+    $or: [
+      { requester: connection.recipient },
+      { recipient: connection.recipient }
+    ],
+    status: 'accepted'
+  });
+
   res.json({
     success: true,
-    data: connection
+    data: {
+      connection,
+      connectionCounts: {
+        requester: requesterConnections,
+        recipient: recipientConnections
+      },
+      message: 'Connection accepted successfully'
+    }
   });
 });
 
@@ -142,7 +189,20 @@ export const rejectConnection = asyncHandler(async (req, res) => {
     });
   }
 
+  // Check if connection is already rejected
+  if (connection.status === 'rejected') {
+    return res.status(400).json({
+      success: false,
+      message: 'Connection is already rejected'
+    });
+  }
+
+  // Reject the connection
   await connection.reject();
+
+  // Populate user details for both requester and recipient
+  await connection.populate('requester', 'username firstName lastName avatar organization');
+  await connection.populate('recipient', 'username firstName lastName avatar organization');
 
   // Create notification for requester
   try {
@@ -153,9 +213,33 @@ export const rejectConnection = asyncHandler(async (req, res) => {
     console.error('Error creating rejection notification:', error);
   }
 
+  // Get updated connection counts for both users
+  const requesterConnections = await Connection.countDocuments({
+    $or: [
+      { requester: connection.requester },
+      { recipient: connection.requester }
+    ],
+    status: 'accepted'
+  });
+
+  const recipientConnections = await Connection.countDocuments({
+    $or: [
+      { requester: connection.recipient },
+      { recipient: connection.recipient }
+    ],
+    status: 'accepted'
+  });
+
   res.json({
     success: true,
-    message: 'Connection request rejected'
+    data: {
+      connection,
+      connectionCounts: {
+        requester: requesterConnections,
+        recipient: recipientConnections
+      },
+      message: 'Connection request rejected'
+    }
   });
 });
 

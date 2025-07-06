@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Textarea } from "@/components/ui/textarea";
 import { MapPin, Phone, Mail, Calendar, Star, Package, Users, Handshake, Edit, Settings } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProfileCompletionModal } from "./ProfileCompletionModal";
@@ -11,7 +12,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { usersAPI, postsAPI, connectionsAPI } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { TrendingUp, Award, Globe, Building } from "lucide-react";
-import { MessageCircle, Share2, Heart, Plus, Eye, Trash2 } from "lucide-react";
+import { MessageCircle, Share2, Heart, Plus, Eye, Trash2, Send, X } from "lucide-react";
 
 export const Profile = () => {
   const { user, updateUser } = useAuth();
@@ -26,6 +27,8 @@ export const Profile = () => {
   const [userConnections, setUserConnections] = useState([]);
   const [userMetrics, setUserMetrics] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [commentInputs, setCommentInputs] = useState<{ [key: string]: string }>({});
+  const [showComments, setShowComments] = useState<{ [key: string]: boolean }>({});
 
   // Check if profile is complete
   const isProfileComplete = user && 
@@ -76,8 +79,28 @@ export const Profile = () => {
   const handlePostLike = async (postId: string) => {
     try {
       await postsAPI.likePost(postId);
-      // Refresh posts
-      loadUserData();
+      // Update local state instead of reloading all posts
+      setUserPosts(prevPosts => 
+        prevPosts.map(post => {
+          if (post._id === postId) {
+            const isLiked = post.likes?.some((like: any) => like._id === user?._id);
+            if (isLiked) {
+              // Unlike: remove user from likes array
+              return {
+                ...post,
+                likes: post.likes?.filter((like: any) => like._id !== user?._id) || []
+              };
+            } else {
+              // Like: add user to likes array
+              return {
+                ...post,
+                likes: [...(post.likes || []), user]
+              };
+            }
+          }
+          return post;
+        })
+      );
     } catch (error) {
       toast({
         title: "Error",
@@ -90,6 +113,23 @@ export const Profile = () => {
   const handlePostShare = async (postId: string) => {
     try {
       await postsAPI.sharePost(postId);
+      
+      // Update local state instead of reloading all posts
+      setUserPosts(prevPosts => 
+        prevPosts.map(post => {
+          if (post._id === postId) {
+            const isShared = post.shares?.some((share: any) => share._id === user?._id);
+            if (!isShared) {
+              return {
+                ...post,
+                shares: [...(post.shares || []), user]
+              };
+            }
+          }
+          return post;
+        })
+      );
+      
       toast({
         title: "Shared!",
         description: "Post shared successfully",
@@ -101,6 +141,74 @@ export const Profile = () => {
         variant: "destructive"
       });
     }
+  };
+
+  const handleAddComment = async (postId: string) => {
+    const content = commentInputs[postId]?.trim();
+    if (!content) return;
+
+    try {
+      const response = await postsAPI.addComment(postId, { content });
+      setCommentInputs(prev => ({ ...prev, [postId]: '' }));
+      
+      // Update local state with the new comment
+      setUserPosts(prevPosts => 
+        prevPosts.map(post => {
+          if (post._id === postId) {
+            return {
+              ...post,
+              comments: [...(post.comments || []), response.data.data]
+            };
+          }
+          return post;
+        })
+      );
+      
+      toast({
+        title: "Comment added!",
+        description: "Your comment has been posted successfully",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to add comment",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleRemoveComment = async (postId: string, commentId: string) => {
+    try {
+      await postsAPI.removeComment(postId, commentId);
+      
+      // Update local state by removing the comment
+      setUserPosts(prevPosts => 
+        prevPosts.map(post => {
+          if (post._id === postId) {
+            return {
+              ...post,
+              comments: post.comments?.filter((comment: any) => comment._id !== commentId) || []
+            };
+          }
+          return post;
+        })
+      );
+      
+      toast({
+        title: "Comment removed!",
+        description: "Comment has been deleted successfully",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to remove comment",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const toggleComments = (postId: string) => {
+    setShowComments(prev => ({ ...prev, [postId]: !prev[postId] }));
   };
 
   const handleDeletePost = async (postId: string) => {
@@ -131,6 +239,17 @@ export const Profile = () => {
     if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
     if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
     return num.toString();
+  };
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffInHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60));
+    
+    if (diffInHours < 1) return "Just now";
+    if (diffInHours < 24) return `${diffInHours}h ago`;
+    if (diffInHours < 48) return "Yesterday";
+    return date.toLocaleDateString();
   };
 
   if (!user) {
@@ -301,11 +420,10 @@ export const Profile = () => {
 
         {/* Main Content Tabs */}
         <Tabs defaultValue="posts" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="posts">Posts</TabsTrigger>
             <TabsTrigger value="connections">Connections</TabsTrigger>
             <TabsTrigger value="achievements">Achievements</TabsTrigger>
-            <TabsTrigger value="activity">Activity</TabsTrigger>
           </TabsList>
 
           <TabsContent value="posts" className="space-y-4">
@@ -357,10 +475,13 @@ export const Profile = () => {
                                 <Heart className="w-4 h-4" />
                                 <span>{post.likeCount || 0}</span>
                               </button>
-                              <div className="flex items-center space-x-1">
+                              <button 
+                                onClick={() => toggleComments(post._id)}
+                                className="flex items-center space-x-1 hover:text-blue-600"
+                              >
                                 <MessageCircle className="w-4 h-4" />
                                 <span>{post.commentCount || 0}</span>
-                              </div>
+                              </button>
                               <button 
                                 onClick={() => handlePostShare(post._id)}
                                 className="flex items-center space-x-1 hover:text-green-600"
@@ -380,6 +501,90 @@ export const Profile = () => {
                               {new Date(post.createdAt).toLocaleDateString()}
                             </span>
                           </div>
+
+                          {/* Comments Section */}
+                          {showComments[post._id] && (
+                            <div className="border-t pt-4 space-y-4 mt-4">
+                              {/* Comment Input */}
+                              <div className="flex space-x-3">
+                                <Avatar className="w-8 h-8 flex-shrink-0">
+                                  <AvatarImage src={user?.avatar} />
+                                  <AvatarFallback className="text-xs">
+                                    {user?.firstName?.charAt(0) || user?.username?.charAt(0)}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <div className="flex-1 flex space-x-2">
+                                  <Textarea
+                                    placeholder="Write a comment..."
+                                    value={commentInputs[post._id] || ''}
+                                    onChange={(e) => setCommentInputs(prev => ({ 
+                                      ...prev, 
+                                      [post._id]: e.target.value 
+                                    }))}
+                                    className="min-h-[60px] resize-none border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter' && !e.shiftKey) {
+                                        e.preventDefault();
+                                        handleAddComment(post._id);
+                                      }
+                                    }}
+                                  />
+                                  <Button
+                                    onClick={() => handleAddComment(post._id)}
+                                    disabled={!commentInputs[post._id]?.trim()}
+                                    size="sm"
+                                    className="self-end bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                                  >
+                                    <Send className="w-4 h-4" />
+                                  </Button>
+                                </div>
+                              </div>
+
+                              {/* Comments List */}
+                              {post.comments && post.comments.length > 0 ? (
+                                <div className="space-y-3">
+                                  {post.comments.map((comment: any) => (
+                                    <div key={comment._id} className="flex space-x-3 group">
+                                      <Avatar className="w-8 h-8 flex-shrink-0">
+                                        <AvatarImage src={comment.user?.avatar} />
+                                        <AvatarFallback className="text-xs">
+                                          {comment.user?.firstName?.charAt(0) || comment.user?.username?.charAt(0)}
+                                        </AvatarFallback>
+                                      </Avatar>
+                                      <div className="flex-1 min-w-0">
+                                        <div className="bg-gray-50 hover:bg-gray-100 rounded-lg p-3 transition-colors duration-200">
+                                          <div className="flex items-center justify-between mb-2">
+                                            <span className="font-medium text-sm text-gray-900">
+                                              {comment.user?.firstName} {comment.user?.lastName}
+                                            </span>
+                                            <span className="text-xs text-gray-500 flex-shrink-0">
+                                              {formatDate(comment.createdAt)}
+                                            </span>
+                                          </div>
+                                          <p className="text-sm text-gray-700 leading-relaxed">{comment.content}</p>
+                                        </div>
+                                        {comment.user?._id === user?._id && (
+                                          <div className="mt-2 flex justify-end">
+                                            <button
+                                              onClick={() => handleRemoveComment(post._id, comment._id)}
+                                              className="inline-flex items-center space-x-1 px-2 py-1 text-xs text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-md transition-all duration-200"
+                                            >
+                                              <X className="w-3 h-3" />
+                                              <span>Delete</span>
+                                            </button>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div className="text-center py-4 text-gray-500 text-sm">
+                                  No comments yet. Be the first to comment!
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </CardContent>
@@ -477,39 +682,6 @@ export const Profile = () => {
                 </CardContent>
               </Card>
             </div>
-          </TabsContent>
-
-          <TabsContent value="activity" className="space-y-4">
-            <h2 className="text-xl font-semibold">Recent Activity</h2>
-            <Card>
-              <CardContent className="p-4">
-                <div className="space-y-4">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                    <div className="flex-1">
-                      <p className="text-sm">You liked a post about sustainable packaging</p>
-                      <p className="text-xs text-gray-500">2 hours ago</p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center space-x-3">
-                    <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                    <div className="flex-1">
-                      <p className="text-sm">You connected with Ravi Kumar</p>
-                      <p className="text-xs text-gray-500">1 day ago</p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center space-x-3">
-                    <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
-                    <div className="flex-1">
-                      <p className="text-sm">You shared a post about solar energy</p>
-                      <p className="text-xs text-gray-500">3 days ago</p>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
           </TabsContent>
         </Tabs>
       </div>

@@ -142,15 +142,23 @@ connectionSchema.statics.findConnection = function(user1Id, user2Id) {
 };
 
 // Static method to get all connections for a user
-connectionSchema.statics.getUserConnections = function(userId, status = 'accepted') {
-  return this.find({
+connectionSchema.statics.getUserConnections = function(userId, status = null) {
+  const query = {
     $or: [
       { requester: userId },
       { recipient: userId }
-    ],
-    status: status
-  }).populate('requester', 'username firstName lastName avatar organization')
-    .populate('recipient', 'username firstName lastName avatar organization');
+    ]
+  };
+  
+  // Only filter by status if it's provided
+  if (status) {
+    query.status = status;
+  }
+  
+  return this.find(query)
+    .populate('requester', 'username firstName lastName avatar organization')
+    .populate('recipient', 'username firstName lastName avatar organization')
+    .sort({ createdAt: -1 });
 };
 
 export default mongoose.model('Connection', connectionSchema); 

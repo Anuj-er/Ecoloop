@@ -10,6 +10,7 @@ import {
   Settings,
   X
 } from 'lucide-react';
+import { ToastAction } from '@/components/ui/toast';
 
 interface NotificationToastProps {
   onNotificationReceived?: () => void;
@@ -83,21 +84,29 @@ export const NotificationToast = ({ onNotificationReceived }: NotificationToastP
   const getNotificationAction = (type: string) => {
     switch (type) {
       case 'connection_request':
-        return {
-          altText: 'View connection request',
-          onClick: () => {
-            // Navigate to connections page
-            window.location.href = '#connect';
-          },
-        } as any;
+        return (
+          <ToastAction 
+            altText="View connection request" 
+            onClick={() => {
+              // Navigate to connections page
+              window.location.href = '#connect';
+            }}
+          >
+            View
+          </ToastAction>
+        );
       case 'new_message':
-        return {
-          altText: 'View message',
-          onClick: () => {
-            // Navigate to messages
-            window.location.href = '#connect';
-          },
-        } as any;
+        return (
+          <ToastAction 
+            altText="View message" 
+            onClick={() => {
+              // Navigate to messages
+              window.location.href = '#connect';
+            }}
+          >
+            View
+          </ToastAction>
+        );
       default:
         return undefined;
     }

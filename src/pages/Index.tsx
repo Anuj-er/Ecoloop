@@ -1,4 +1,3 @@
-
 import { useState } from "react";
 import { Navbar } from "@/components/Navbar";
 import { HeroSection } from "@/components/HeroSection";
@@ -10,7 +9,6 @@ import { Footer } from "@/components/Footer";
 import { Feed } from "@/components/Feed";
 import { Profile } from "@/components/Profile";
 import { Connect } from "@/components/Connect";
-import { ImpactDashboard } from "@/components/ImpactDashboard";
 import { useAuth } from "@/contexts/AuthContext";
 
 const Index = () => {
@@ -30,8 +28,6 @@ const Index = () => {
         return isAuthenticated ? <Profile /> : null;
       case 'connect':
         return isAuthenticated ? <Connect /> : null;
-      case 'impact':
-        return isAuthenticated ? <ImpactDashboard /> : null;
       case 'assistant':
         return isAuthenticated ? (
           <div className="min-h-screen pt-20 px-4 bg-gradient-to-b from-green-50 to-amber-50 flex items-center justify-center">

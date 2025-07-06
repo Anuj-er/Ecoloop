@@ -73,14 +73,14 @@ export const Navbar = ({ onSectionChange, currentSection }: NavbarProps) => {
               Connect
             </Button>
 
-            <Button
+            {/* <Button
               variant={currentSection === 'impact' ? 'default' : 'ghost'}
               onClick={() => onSectionChange('impact')}
               className="text-sm"
             >
               <BarChart3 className="w-4 h-4 mr-2" />
               Impact
-            </Button>
+            </Button> */}
 
             <Button
               variant={currentSection === 'assistant' ? 'default' : 'ghost'}
@@ -120,7 +120,7 @@ export const Navbar = ({ onSectionChange, currentSection }: NavbarProps) => {
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" className="flex items-center space-x-2">
                     <Avatar className="w-8 h-8">
-                      <AvatarImage src={user?.avatar || "/images/avtars/Sarla.png"} />
+                      <AvatarImage src={user?.avatar} />
                       <AvatarFallback>
                         {user?.firstName?.charAt(0) || user?.username?.charAt(0) || "U"}
                       </AvatarFallback>
