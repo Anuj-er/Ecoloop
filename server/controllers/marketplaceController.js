@@ -81,38 +81,94 @@ export const createMarketplaceItem = asyncHandler(async (req, res) => {
 
   for (const image of images) {
     const aiAnalysis = await analyzeImageWithAI(image.url);
-    console.log('AI Analysis for image:', image.url, aiAnalysis);
-    
-    // Check if image quality is acceptable
+    console.log('AI Analysis for image:', image.url, aiAnalysis);      // Check if image quality is acceptable
     if (aiAnalysis.status === 'blurry' || aiAnalysis.status === 'low_quality' || aiAnalysis.confidence < 5 || aiAnalysis.status === 'suspicious') {
       hasLowQualityImage = true;
       
+      // Extract the file name from the URL to make feedback more specific
+      const fileName = image.url.split('/').pop().split('?')[0] || "Image";
+      
       let detailedMessage = '';
+      let actionableTips = [];
       
       // Provide detailed feedback based on the specific issue
       if (aiAnalysis.status === 'blurry') {
-        detailedMessage = `Image appears to be blurry. Please upload a sharper image with better focus.`;
+        detailedMessage = `Your image "${fileName}" appears to be blurry. We need a clearer picture.`;
+        actionableTips = [
+          'Hold your camera steady or use a surface for support',
+          'Make sure your camera lens is clean and free from smudges',
+          'Ensure good lighting to allow the camera to focus properly'
+        ];
       } else if (aiAnalysis.status === 'low_quality') {
         if (aiAnalysis.quality_analysis && aiAnalysis.quality_analysis.issues) {
-          const issues = aiAnalysis.quality_analysis.issues.join(', ');
-          detailedMessage = `Image quality issues: ${issues}. Consider better lighting or higher resolution.`;
+          // Get specific quality issues
+          const issues = aiAnalysis.quality_analysis.issues;
+          const qualityScore = aiAnalysis.quality_analysis.quality_score || 0;
+          
+          if (issues.includes('Image too dark')) {
+            detailedMessage = `Your image "${fileName}" is too dark (quality score: ${qualityScore.toFixed(0)}/100).`;
+            actionableTips = [
+              'Take photos in a well-lit area with natural light if possible',
+              'Turn on additional lights if indoors',
+              'Avoid backlighting that causes shadows on your item'
+            ];
+          } else if (issues.includes('Image too bright')) {
+            detailedMessage = `Your image "${fileName}" is too bright or washed out (quality score: ${qualityScore.toFixed(0)}/100).`;
+            actionableTips = [
+              'Avoid direct sunlight or harsh lighting',
+              'Don\'t use flash too close to the item',
+              'Find more balanced, diffused lighting conditions'
+            ];
+          } else if (issues.includes('Image too small')) {
+            detailedMessage = `Your image "${fileName}" has low resolution (quality score: ${qualityScore.toFixed(0)}/100).`;
+            actionableTips = [
+              'Use a higher resolution camera or phone',
+              'Avoid cropping images to very small sizes',
+              'Check your camera settings for higher quality options'
+            ];
+          } else {
+            const issuesList = issues.join(', ');
+            detailedMessage = `Your image "${fileName}" has quality issues: ${issuesList} (quality score: ${qualityScore.toFixed(0)}/100).`;
+            actionableTips = [
+              'Use better lighting for your photos',
+              'Hold your camera steady to avoid blur',
+              'Make sure the item is clearly visible and fills most of the frame'
+            ];
+          }
         } else {
-          detailedMessage = `Image quality is too low. Please use a better quality image.`;
+          detailedMessage = `Your image "${fileName}" quality is too low (below our minimum standards).`;
+          actionableTips = [
+            'Use a better camera if available',
+            'Ensure good lighting conditions',
+            'Make sure your lens is clean and focused on the item'
+          ];
         }
       } else if (aiAnalysis.status === 'suspicious') {
-        detailedMessage = `Image flagged for review (confidence: ${aiAnalysis.confidence.toFixed(2)}%). Please use a clearly visible image of the recyclable item.`;
+        detailedMessage = `Your image "${fileName}" was flagged for review (confidence: ${aiAnalysis.confidence.toFixed(0)}%).`;
+        actionableTips = [
+          'Ensure your image contains only recyclable materials',
+          'Avoid images with unrelated objects, text, or people',
+          'Take a photo that clearly shows just the item you\'re listing'
+        ];
       } else if (aiAnalysis.confidence < 5) {
-        detailedMessage = `AI could not confidently identify the item (${aiAnalysis.confidence.toFixed(2)}% confidence). Please use a clearer image showing the recyclable material.`;
+        detailedMessage = `We couldn't identify what's in your image "${fileName}" (${aiAnalysis.confidence.toFixed(0)}% confidence).`;
         if (aiAnalysis.label) {
-          detailedMessage += ` The AI detected "${aiAnalysis.label}" but with low confidence.`;
+          detailedMessage += ` Our system detected "${aiAnalysis.label}" but with very low confidence.`;
         }
+        actionableTips = [
+          'Center the item in the frame and ensure it\'s clearly visible',
+          'Remove distracting backgrounds or other objects',
+          'Take the photo from a better angle that shows the item clearly',
+          'Make sure you\'re photographing recyclable materials related to your listing'
+        ];
       }
       
       aiWarnings.push({
         imageUrl: image.url,
         issue: aiAnalysis.status,
         confidence: aiAnalysis.confidence,
-        message: detailedMessage || `Image quality issue detected: ${aiAnalysis.status} (confidence: ${aiAnalysis.confidence}%)`,
+        message: detailedMessage || `Image quality issue detected with "${fileName}" (${aiAnalysis.status})`,
+        tips: actionableTips,
         rawAnalysis: {
           label: aiAnalysis.label,
           rawLabel: aiAnalysis.raw_label,
@@ -144,7 +200,15 @@ export const createMarketplaceItem = asyncHandler(async (req, res) => {
     return res.status(400).json({
       success: false,
       message: `Image quality issues detected. Please address the following:\n${detailedMessage}`,
-      warnings: aiWarnings,
+      warnings: aiWarnings.map(warning => ({
+        ...warning,
+        // Ensure tips are included in the response
+        tips: warning.tips || [
+          'Take a clear, well-lit photo',
+          'Ensure your item is the main focus of the image',
+          'Hold your camera steady to avoid blur'
+        ]
+      })),
       blockPost: true,
       detailedAnalysis: true,
       aiDetails: true
