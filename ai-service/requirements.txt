@@ -1,0 +1,8 @@
+Flask==2.3.3
+Flask-CORS==4.0.0
+tensorflow==2.13.0
+Pillow==10.0.1
+opencv-python==4.8.1.78
+numpy==1.24.3
+requests==2.31.0
+gunicorn==21.2.0

@@ -11,7 +11,7 @@ import {
   DropdownMenuTrigger 
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/contexts/AuthContext";
-import { User, Globe, BarChart3, MessageCircle, Users, Menu, Home, LogOut, ShieldAlert } from "lucide-react";
+import { User, Globe, BarChart3, MessageCircle, Users, Menu, Home, LogOut, ShieldAlert, ShoppingCart } from "lucide-react";
 import { NotificationBell } from "./NotificationBell";
 
 interface NavbarProps {
@@ -71,6 +71,15 @@ export const Navbar = ({ onSectionChange, currentSection }: NavbarProps) => {
             >
               <Users className="w-4 h-4 mr-2" />
               Connect
+            </Button>
+
+            <Button
+              variant="ghost"
+              onClick={() => navigate('/marketplace')}
+              className="text-sm"
+            >
+              <ShoppingCart className="w-4 h-4 mr-2" />
+              Marketplace
             </Button>
 
             {/* <Button

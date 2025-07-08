@@ -28,11 +28,19 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      // Token expired or invalid
+    console.log('API interceptor caught error:', error);
+    
+    // Only redirect if not already on login page to avoid redirect loops
+    if (error.response?.status === 401 && 
+        !window.location.pathname.includes('login') && 
+        !window.location.pathname.includes('register')) {
+      console.log('Unauthorized access detected - clearing auth state');
+      // Token expired or invalid - don't redirect automatically
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      window.location.href = '/';
+      
+      // Don't redirect automatically, let components handle this
+      // window.location.href = '/';
     }
     return Promise.reject(error);
   }
