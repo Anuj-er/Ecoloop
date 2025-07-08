@@ -11,7 +11,7 @@ import {
   DropdownMenuTrigger 
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/contexts/AuthContext";
-import { User, Globe, BarChart3, MessageCircle, Users, Menu, Home, LogOut } from "lucide-react";
+import { User, Globe, BarChart3, MessageCircle, Users, Menu, Home, LogOut, ShieldAlert } from "lucide-react";
 import { NotificationBell } from "./NotificationBell";
 
 interface NavbarProps {
@@ -21,7 +21,7 @@ interface NavbarProps {
 
 export const Navbar = ({ onSectionChange, currentSection }: NavbarProps) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const { user, isAuthenticated, logout } = useAuth();
+  const { user, isAuthenticated, isAdmin, logout } = useAuth();
   const navigate = useNavigate();
 
   const languages = [
@@ -109,42 +109,65 @@ export const Navbar = ({ onSectionChange, currentSection }: NavbarProps) => {
               </DropdownMenuContent>
             </DropdownMenu>
 
-            {/* Notification Bell */}
-            {isAuthenticated && (
-              <NotificationBell className="mr-2" />
-            )}
-
             {/* Authentication Buttons */}
             {isAuthenticated ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className="flex items-center space-x-2">
-                    <Avatar className="w-8 h-8">
-                      <AvatarImage src={user?.avatar} />
-                      <AvatarFallback>
-                        {user?.firstName?.charAt(0) || user?.username?.charAt(0) || "U"}
-                      </AvatarFallback>
-                    </Avatar>
-                    <span className="text-sm">{user?.firstName || user?.username || "User"}</span>
+              <div className="flex items-center space-x-4">
+                <NotificationBell />
+                {isAdmin && (
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="flex items-center space-x-2 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-800"
+                    onClick={() => navigate('/admin/fraud-detection')}
+                  >
+                    <ShieldAlert className="w-4 h-4" />
+                    <span>Admin Dashboard</span>
                   </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent>
-                  <DropdownMenuItem onClick={() => navigate('/profile')}>
-                    <User className="w-4 h-4 mr-2" />
-                    View Profile
-                  </DropdownMenuItem>
-                  <DropdownMenuItem>Settings</DropdownMenuItem>
-                  <DropdownMenuItem onClick={logout}>
-                    <LogOut className="w-4 h-4 mr-2" />
-                    Logout
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                )}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" className="flex items-center space-x-2">
+                      <Avatar className="w-8 h-8">
+                        <AvatarImage src={user?.avatar} />
+                        <AvatarFallback className={isAdmin ? "bg-blue-100 text-blue-800" : "bg-green-100 text-green-800"}>
+                          {user?.firstName?.charAt(0) || user?.username?.charAt(0) || "U"}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="text-sm">{user?.firstName || user?.username || "User"}</span>
+                      {isAdmin && <Badge className="ml-1 bg-blue-100 text-blue-700 text-xs">Admin</Badge>}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuItem onClick={() => navigate('/profile')}>
+                      <User className="w-4 h-4 mr-2" />
+                      View Profile
+                    </DropdownMenuItem>
+                    {/* Show fraud detection dashboard for admin users */}
+                    {isAdmin && (
+                      <DropdownMenuItem onClick={() => navigate('/admin/fraud-detection')}>
+                        <ShieldAlert className="w-4 h-4 mr-2" />
+                        Fraud Detection Dashboard
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem>Settings</DropdownMenuItem>
+                    <DropdownMenuItem onClick={logout}>
+                      <LogOut className="w-4 h-4 mr-2" />
+                      Logout
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             ) : (
               <div className="flex items-center space-x-2">
                 <Link to="/login">
                   <Button variant="ghost" size="sm">
                     Login
+                  </Button>
+                </Link>
+                <Link to="/admin/login">
+                  <Button variant="outline" size="sm" className="flex items-center">
+                    <ShieldAlert className="w-4 h-4 mr-1" />
+                    Admin
                   </Button>
                 </Link>
                 <Link to="/register">

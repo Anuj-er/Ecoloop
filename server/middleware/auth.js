@@ -100,9 +100,28 @@ export const requireOwnership = (resourceModel) => {
   };
 };
 
+// Admin email addresses
+const ADMIN_EMAILS = ['admin@ecoloop.com', 'admin@example.com'];
+
+// Middleware to check if user is admin (based on email)
+export const requireAdmin = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ message: 'Authentication required' });
+  }
+
+  if (!ADMIN_EMAILS.includes(req.user.email)) {
+    return res.status(403).json({ 
+      message: 'Admin access required',
+      code: 'ADMIN_ACCESS_REQUIRED'
+    });
+  }
+
+  next();
+};
+
 // Generate JWT token
 export const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRE || '7d'
   });
-}; 
+};

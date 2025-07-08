@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -7,10 +7,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { FraudAlert } from "@/components/ui/fraud-alert";
 import { useAuth } from "@/contexts/AuthContext";
 import { postsAPI, uploadAPI } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
-import { Camera, X, Upload, MapPin, TrendingUp } from "lucide-react";
+import { Camera, X, Upload, MapPin, TrendingUp, AlertTriangle, ShieldAlert } from "lucide-react";
+import { ClientFraudDetection } from "@/services/clientFraudDetection";
 
 interface CreatePostModalProps {
   isOpen: boolean;
@@ -42,6 +45,10 @@ export const CreatePostModal = ({ isOpen, onClose, onPostCreated }: CreatePostMo
     }
   });
   
+  // Fraud detection state
+  const [fraudAnalysis, setFraudAnalysis] = useState<any>(null);
+  const [showFraudWarning, setShowFraudWarning] = useState(false);
+  
   const [media, setMedia] = useState<CloudinaryMedia[]>([]);
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -62,6 +69,20 @@ export const CreatePostModal = ({ isOpen, onClose, onPostCreated }: CreatePostMo
     'green-tech', 'organic-farming', 'eco-tourism', 'clean-water', 
     'carbon-neutral', 'biodiversity'
   ];
+
+  // Run fraud analysis whenever form data changes
+  useEffect(() => {
+    if (formData.content.length > 10 || formData.impact.carbonSaved > 0 || 
+        formData.impact.wasteReduced > 0 || formData.impact.energySaved > 0) {
+      const analysis = ClientFraudDetection.analyzePost(formData);
+      console.log('Fraud analysis:', analysis); // Log the analysis result
+      setFraudAnalysis(analysis);
+      setShowFraudWarning(analysis.isSuspicious);
+    } else {
+      setFraudAnalysis(null);
+      setShowFraudWarning(false);
+    }
+  }, [formData]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -156,6 +177,23 @@ export const CreatePostModal = ({ isOpen, onClose, onPostCreated }: CreatePostMo
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Run final fraud check before submission
+    const finalAnalysis = ClientFraudDetection.analyzePost(formData);
+    
+    // If post is highly suspicious, ask for confirmation
+    if (finalAnalysis.fraudProbability > 0.7) {
+      const confirmSubmit = window.confirm(
+        "This post has been flagged by our fraud detection system and may be held for review. " +
+        "Are you sure you want to submit it?\n\n" +
+        "Potential issues:\n" + finalAnalysis.warnings.join('\n')
+      );
+      
+      if (!confirmSubmit) {
+        return;
+      }
+    }
+    
     setIsLoading(true);
 
     try {
@@ -440,13 +478,41 @@ export const CreatePostModal = ({ isOpen, onClose, onPostCreated }: CreatePostMo
               )}
             </div>
 
+            {/* Fraud Detection Warning */}
+            {fraudAnalysis && fraudAnalysis.score > 0 && (
+              <div className="mb-4">
+                <FraudAlert 
+                  fraudScore={fraudAnalysis.score}
+                  fraudFlags={fraudAnalysis.warnings}
+                  suggestions={fraudAnalysis.suggestions}
+                  severity={fraudAnalysis.fraudProbability > 0.7 ? 'high' : fraudAnalysis.fraudProbability > 0.4 ? 'medium' : 'low'}
+                  showDetails={true}
+                  onDismiss={() => setShowFraudWarning(false)}
+                />
+                <p className="text-xs text-gray-500 mt-2 text-center">
+                  {fraudAnalysis.fraudProbability > 0.7 ? 
+                    "Posts with highly suspicious content may be held for review by moderators." : 
+                    "This post contains potentially misleading content."}
+                </p>
+              </div>
+            )}
+
             {/* Submit Button */}
             <div className="flex justify-end space-x-2">
               <Button type="button" variant="outline" onClick={onClose}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={isLoading || !formData.content.trim()}>
-                {isLoading ? "Creating..." : "Create Post"}
+              <Button 
+                type="submit" 
+                disabled={isLoading || !formData.content.trim()}
+                className={showFraudWarning ? "bg-amber-600 hover:bg-amber-700" : ""}
+              >
+                {isLoading ? "Creating..." : (
+                  <>
+                    {showFraudWarning && <ShieldAlert className="w-4 h-4 mr-1" />}
+                    {showFraudWarning ? "Create Anyway" : "Create Post"}
+                  </>
+                )}
               </Button>
             </div>
           </form>

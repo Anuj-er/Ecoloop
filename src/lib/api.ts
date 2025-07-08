@@ -122,4 +122,12 @@ export const notificationsAPI = {
   deleteAllNotifications: (params?: any) => api.delete('/notifications', { params }),
 };
 
+// Admin API
+export const adminAPI = {
+  getFlaggedPosts: (params?: any) => api.get('/admin/flagged-posts', { params }),
+  reviewFlaggedPost: (id: string, decision: 'approve' | 'reject') => 
+    api.put(`/admin/flagged-posts/${id}/review`, { decision }),
+  getFraudStats: () => api.get('/admin/fraud-stats'),
+};
+
 export default api; 

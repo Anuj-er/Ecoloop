@@ -32,8 +32,10 @@ interface User {
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
+  isAdmin: boolean;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
+  adminLogin: (email: string, password: string) => Promise<void>;
   register: (userData: any) => Promise<void>;
   logout: () => void;
   updateUser: (userData: Partial<User>) => void;
@@ -55,6 +57,7 @@ interface AuthProviderProps {
 
 export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [user, setUser] = useState<User | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
 
@@ -65,11 +68,17 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       if (token) {
         try {
           const response = await authAPI.getMe();
-          setUser(response.data.data);
+          const userData = response.data.data;
+          setUser(userData);
+          
+          // Check if user has admin email
+          const adminEmails = ['admin@ecoloop.com', 'admin@example.com'];
+          setIsAdmin(adminEmails.includes(userData.email));
         } catch (error) {
           // Token is invalid, clear it
           localStorage.removeItem('token');
           localStorage.removeItem('user');
+          setIsAdmin(false);
         }
       }
       setIsLoading(false);
@@ -87,12 +96,41 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       localStorage.setItem('user', JSON.stringify(userData));
       setUser(userData);
       
+      // Check if user is admin
+      const adminEmails = ['admin@ecoloop.com', 'admin@example.com'];
+      setIsAdmin(adminEmails.includes(email));
+      
       toast({
         title: "Welcome back!",
         description: "Successfully logged in to Eco Loop AI Connect.",
       });
     } catch (error: any) {
       throw new Error(error.response?.data?.message || 'Login failed');
+    }
+  };
+  
+  const adminLogin = async (email: string, password: string) => {
+    try {
+      // Admin email validation
+      const adminEmails = ['admin@ecoloop.com', 'admin@example.com'];
+      if (!adminEmails.includes(email)) {
+        throw new Error('This email is not registered as an admin');
+      }
+      
+      const response = await authAPI.login({ email, password });
+      const { token, ...userData } = response.data.data;
+      
+      localStorage.setItem('token', token);
+      localStorage.setItem('user', JSON.stringify(userData));
+      setUser(userData);
+      setIsAdmin(true);
+      
+      toast({
+        title: "Welcome, Admin!",
+        description: "Successfully logged in to Admin Dashboard.",
+      });
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Admin login failed');
     }
   };
 
@@ -125,6 +163,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     setUser(null);
+    setIsAdmin(false);
     
     toast({
       title: "Logged out",
@@ -139,8 +178,10 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const value = {
     user,
     isAuthenticated: !!user,
+    isAdmin,
     isLoading,
     login,
+    adminLogin,
     register,
     logout,
     updateUser,
