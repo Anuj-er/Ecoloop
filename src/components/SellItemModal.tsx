@@ -46,9 +46,13 @@ interface ImageUpload {
     confidence: number;
     status: string;
     recommendations: string[];
+    specific_issue?: string;
+    document_detection_method?: string;
+    document_confidence?: number;
   };
   uploading?: boolean;
   analyzing?: boolean;
+  allRecommendations?: string[];
 }
 
 export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
@@ -177,31 +181,9 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
             const aiResult = aiResponse.data;
             console.log('Real-time AI analysis:', aiResult);
             
-            // Check for potential document images (non-recyclable materials)
-            const rawLabel = aiResult.raw_label ? aiResult.raw_label.toLowerCase() : '';
-            const isLikelyDocument = 
-              rawLabel.includes('document') || 
-              rawLabel.includes('text') || 
-              rawLabel.includes('paper') ||
-              rawLabel.includes('book') || 
-              rawLabel.includes('sheet') ||
-              rawLabel.includes('certificate') ||
-              rawLabel.includes('card');
-              
-            // Additional check for documents using confidence patterns
-            let documentDetected = false;
-            if (isLikelyDocument && aiResult.all_predictions) {
-              const documentKeywords = ['document', 'text', 'paper', 'book', 'sheet', 'certificate', 'card', 'letter'];
-              const hasMultipleDocumentMatches = aiResult.all_predictions.filter((p: any) => 
-                documentKeywords.some(keyword => p.label.toLowerCase().includes(keyword))
-              ).length >= 2;
-              
-              if (hasMultipleDocumentMatches) {
-                documentDetected = true;
-                // Override the status for documents
-                aiResult.status = 'inappropriate_content';
-              }
-            }
+            // Check document detection status - the enhanced backend already handles this
+            const documentDetected = aiResult.status === 'inappropriate_content' && 
+                                     aiResult.specific_issue === 'document';
             
             // Update image with AI analysis results
             setImages(prev => prev.map((img, i) => 
@@ -211,40 +193,108 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
                 aiAnalysis: {
                   label: aiResult.label || 'unknown',
                   confidence: aiResult.confidence || 50,
-                  status: documentDetected ? 'inappropriate_content' : (aiResult.status || 'usable'),
+                  status: aiResult.status || 'usable',
                   recommendations: aiResult.recommendations || []
                 }
               } : img
-            ));
-            
-            // If there's an issue, show a warning about this specific image
+            ));              // If there's an issue, show a warning about this specific image
             if (aiResult.status && aiResult.status !== 'usable') {
               const fileName = uploadedImage.url.split('/').pop().split('?')[0];
+              
+              // Get the first recommendation as our warning message (more specific)
               let warningMessage = '';
+              let toastDuration = 6000; // Longer duration for more complex warnings
+              let warningDetails = '';
               
-              if (documentDetected || aiResult.status === 'inappropriate_content') {
-                warningMessage = `Image "${fileName}" appears to be a document or non-recyclable item. Please upload photos of recyclable materials only.`;
-              } else if (aiResult.status === 'blurry') {
-                warningMessage = `Image "${fileName}" appears blurry. Try holding your camera steady.`;
-              } else if (aiResult.status === 'low_quality') {
-                let specificIssue = '';
-                if (aiResult.quality_analysis && aiResult.quality_analysis.issues) {
-                  if (aiResult.quality_analysis.issues.includes('Image too dark')) {
-                    specificIssue = ' (too dark)';
-                  } else if (aiResult.quality_analysis.issues.includes('Image too bright')) {
-                    specificIssue = ' (too bright/washed out)';
-                  }
+              // Add confidence metrics to provide more specific feedback
+              const confidenceMetrics = aiResult.confidence_metrics || {};
+              
+              if (aiResult.recommendations && aiResult.recommendations.length > 0) {
+                warningMessage = aiResult.recommendations[0];
+                
+                // Add additional context based on metrics if available
+                if (aiResult.status === 'blurry' && confidenceMetrics.blur_score) {
+                  warningDetails = `Blur score: ${confidenceMetrics.blur_score.toFixed(1)}/100`;
+                } else if (aiResult.status === 'low_quality' && aiResult.specific_issue === 'too_dark' && 
+                           confidenceMetrics.brightness !== undefined) {
+                  warningDetails = `Brightness: ${confidenceMetrics.brightness.toFixed(1)}/255`;
+                } else if (aiResult.status === 'low_quality' && aiResult.specific_issue === 'too_bright' && 
+                           confidenceMetrics.brightness !== undefined) {
+                  warningDetails = `Brightness: ${confidenceMetrics.brightness.toFixed(1)}/255`;
+                } else if (aiResult.status === 'low_quality' && aiResult.specific_issue === 'too_small' && 
+                           confidenceMetrics.dimensions) {
+                  warningDetails = `Dimensions: ${confidenceMetrics.dimensions}`;
+                } else if (aiResult.status === 'inappropriate_content' && aiResult.specific_issue === 'document' && 
+                           confidenceMetrics.document_confidence !== undefined) {
+                  warningDetails = `Document confidence: ${confidenceMetrics.document_confidence.toFixed(1)}%`;
                 }
-                warningMessage = `Image "${fileName}" has low quality${specificIssue}. Try better lighting conditions.`;
-              } else if (aiResult.status === 'suspicious') {
-                warningMessage = `Image "${fileName}" contains content that doesn't appear to be recyclable material.`;
-              } else if (aiResult.status === 'low_confidence') {
-                warningMessage = `Image "${fileName}" couldn't be clearly identified (${aiResult.confidence?.toFixed(1)}% confidence).`;
+              } else {
+                // Fallback if no recommendations with improved details
+                if (documentDetected || aiResult.status === 'inappropriate_content') {
+                  const docType = aiResult.document_analysis?.document_type || 'document';
+                  warningMessage = `Image "${fileName}" appears to be a ${docType} rather than a recyclable item.`;
+                  
+                  if (confidenceMetrics.document_confidence !== undefined) {
+                    warningDetails = `Document confidence: ${confidenceMetrics.document_confidence.toFixed(1)}%`;
+                  }
+                } else if (aiResult.status === 'blurry') {
+                  warningMessage = `Image "${fileName}" appears blurry and needs to be retaken.`;
+                  
+                  if (confidenceMetrics.blur_score !== undefined) {
+                    warningDetails = `Blur score: ${confidenceMetrics.blur_score.toFixed(1)}/100`;
+                  }
+                } else if (aiResult.status === 'low_quality') {
+                  warningMessage = `Image "${fileName}" has low quality.`;
+                  
+                  if (aiResult.specific_issue === 'too_dark') {
+                    warningMessage += ' (too dark)';
+                    if (confidenceMetrics.brightness !== undefined) {
+                      warningDetails = `Brightness: ${confidenceMetrics.brightness.toFixed(1)}/255`;
+                    }
+                  } else if (aiResult.specific_issue === 'too_bright') {
+                    warningMessage += ' (too bright/washed out)';
+                    if (confidenceMetrics.brightness !== undefined) {
+                      warningDetails = `Brightness: ${confidenceMetrics.brightness.toFixed(1)}/255`;
+                    }
+                  } else if (aiResult.specific_issue === 'too_small') {
+                    warningMessage += ' (resolution too low)';
+                    if (confidenceMetrics.dimensions) {
+                      warningDetails = `Dimensions: ${confidenceMetrics.dimensions}`;
+                    }
+                  }
+                } else if (aiResult.status === 'suspicious') {
+                  warningMessage = `Image "${fileName}" contains content that doesn't appear to be recyclable material.`;
+                  if (aiResult.suspicious_analysis?.indicators?.length > 0) {
+                    warningDetails = `Issues: ${aiResult.suspicious_analysis.indicators.join(', ')}`;
+                  }
+                } else if (aiResult.status === 'low_confidence') {
+                  warningMessage = `Image "${fileName}" couldn't be clearly identified (${aiResult.confidence?.toFixed(1)}% confidence).`;
+                }
               }
               
+              // Display a toast with detailed information
               if (warningMessage) {
-                toast.warning(warningMessage, { duration: 5000 });
+                // Create a richer toast message with details if available
+                const finalMessage = warningDetails 
+                  ? `${warningMessage}\n${warningDetails}`
+                  : warningMessage;
+                  
+                toast.warning(finalMessage, { 
+                  duration: toastDuration,
+                  action: {
+                    label: "Fix It",
+                    onClick: () => scrollToWarnings()
+                  }
+                });
               }
+              
+              // Store all recommendations in image data for displaying in UI
+              setImages(prev => prev.map((img, i) => 
+                i === index ? {
+                  ...img,
+                  allRecommendations: aiResult.recommendations || []
+                } : img
+              ));
             }
           } else {
             // Fallback if analysis fails
@@ -326,6 +376,18 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
   };
 
   const isFormValid = () => {
+    // Check if we have document/inappropriate images that should be rejected outright
+    const hasRejectedImages = images.some(img => 
+      img.aiAnalysis?.status === 'inappropriate_content' || 
+      img.aiAnalysis?.specific_issue === 'document'
+    );
+    
+    if (hasRejectedImages) {
+      // Images with documents or inappropriate content are strictly blocked
+      console.log('Form validation failed: Found document or inappropriate content in images');
+      return false;
+    }
+    
     return (
       formData.title &&
       formData.description &&
@@ -349,6 +411,18 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
   // Handle form submission
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Double check for document images to ensure they can't be submitted
+    const hasDocumentImages = images.some(img => 
+      img.aiAnalysis?.status === 'inappropriate_content' || 
+      img.aiAnalysis?.specific_issue === 'document'
+    );
+    
+    if (hasDocumentImages) {
+      toast.error('Cannot submit with document or certificate images. Please remove these images.');
+      scrollToWarnings();
+      return;
+    }
 
     if (!isFormValid()) {
       toast.error('Please fill all required fields and fix image issues');
@@ -712,8 +786,33 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
               <Alert id="image-upload-warnings" variant="destructive" className="mb-4 border-2 border-red-500 shadow-md">
                 <AlertTriangle className="h-6 w-6 text-red-600" />
                 <AlertDescription className="mt-2">
-                  <div className="font-bold text-lg mb-3 text-red-600">⚠️ Image Quality Issues Detected</div>
-                  <p className="text-sm mb-2 text-gray-700">Click on each warning below to see how to fix the issue:</p>
+                  <div className="font-bold text-lg mb-2 text-red-600">⚠️ Image Quality Issues Detected</div>
+                  
+                  {/* Add summary of issues */}
+                  <div className="mb-3 text-sm text-gray-700">
+                    <p className="mb-1">Our AI analysis has detected the following issues:</p>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {window.lastWarningDetails && window.lastWarningDetails
+                        .filter((detail, i, arr) => 
+                          // Unique warning types
+                          arr.findIndex(d => d.warningType === detail.warningType) === i
+                        )
+                        .map((detail, i) => (
+                          <Badge key={i} className="bg-red-50 text-red-700 border border-red-200">
+                            {detail.warningType.includes('blurry') ? 'Blurry Image' :
+                             detail.warningType.includes('document') ? 'Document Detected' :
+                             detail.warningType.includes('dark') ? 'Too Dark' :
+                             detail.warningType.includes('bright') ? 'Too Bright' :
+                             detail.warningType.includes('quality') ? 'Low Quality' :
+                             detail.warningType.includes('suspicious') ? 'Suspicious Content' :
+                             detail.warningType.includes('confidence') ? 'Low Confidence' :
+                             'Quality Issue'}
+                          </Badge>
+                        ))}
+                    </div>
+                  </div>
+                  
+                  <p className="text-sm mb-3 text-gray-700 border-t border-red-200 pt-2">Detailed AI feedback for each image:</p>
                   <div className="bg-red-50 p-3 rounded-md">
                     <ul className="list-disc list-inside space-y-3">
                       {aiWarnings.map((warning, index) => {
@@ -723,58 +822,100 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
                         
                         return (
                           <li key={index} className="text-sm font-medium">
-                            <div className="font-semibold">{warning}</div>
+                            <div className="font-semibold flex items-center gap-2">
+                              <span className="text-red-600">•</span> {warning}
+                              
+                              {/* Show metrics badge if available */}
+                              {warningDetails?.rawWarning?.aiAnalysis?.confidence && (
+                                <Badge className={`${
+                                  warningDetails.rawWarning.aiAnalysis.confidence < 30 ? 'bg-red-100 text-red-800' : 
+                                  warningDetails.rawWarning.aiAnalysis.confidence < 60 ? 'bg-yellow-100 text-yellow-800' : 
+                                  'bg-blue-100 text-blue-800'
+                                } text-xs ml-2`}>
+                                  {Math.round(warningDetails.rawWarning.aiAnalysis.confidence)}% confidence
+                                </Badge>
+                              )}
+                            </div>
                             
                             {/* Show specific tips based on the issue type */}
-                            <div className="ml-4 mt-1 p-2 bg-white rounded border border-red-200 text-sm">
-                              <strong className="text-red-600">How to fix:</strong>
+                            <div className="ml-4 mt-1 p-3 bg-white rounded border border-red-200 text-sm shadow-sm">
+                              <div className="flex justify-between items-center mb-2">
+                                <strong className="text-red-600 flex items-center">
+                                  <AlertTriangle className="w-3 h-3 mr-1" />
+                                  How to fix:
+                                </strong>
+                                
+                                {/* Add link to specific recommendations if image has them */}
+                                {images.find(img => img.allRecommendations?.length > 0) && (
+                                  <span className="text-xs text-blue-600">See all AI recommendations</span>
+                                )}
+                              </div>
                               
                               {warningType.includes('blurry') && (
-                                <ul className="list-disc list-inside ml-2 mt-1 text-sm">
+                                <ul className="list-disc list-inside ml-2 mt-1 text-sm space-y-1 bg-gray-50 p-2 rounded-md">
                                   <li>Hold your camera still - use both hands or rest against a surface</li>
                                   <li>Use better lighting to help your camera focus</li>
                                   <li>Tap on the item on your screen to focus before taking the photo</li>
+                                  <li className="font-medium text-red-600">For best results: Use a tripod or place your phone on a stable surface</li>
                                 </ul>
                               )}
                               
                               {warningType.includes('confidence') && (
-                                <ul className="list-disc list-inside ml-2 mt-1 text-sm">
+                                <ul className="list-disc list-inside ml-2 mt-1 text-sm space-y-1 bg-gray-50 p-2 rounded-md">
                                   <li>Make sure your item fills at least 70% of the frame</li>
                                   <li>Remove any distracting items from the background</li>
                                   <li>Use a plain background if possible (white/neutral color)</li>
                                   <li>Take the photo directly facing the item</li>
+                                  <li className="font-medium text-red-600">For best results: Take multiple photos from different angles</li>
                                 </ul>
                               )}
                               
+                              {warningType.includes('document') && (
+                                <div className="ml-2 mt-1 text-sm bg-red-50 border border-red-200 p-3 rounded-md">
+                                  <p className="font-bold text-red-600 mb-2">⚠️ Document Detected - Not Allowed ⚠️</p>
+                                  <ul className="list-disc list-inside space-y-1">
+                                    <li>This appears to be a document, ID, certificate or paper with text</li>
+                                    <li>Documents are strictly prohibited and cannot be uploaded</li>
+                                    <li>Our marketplace only accepts photos of actual recyclable materials</li>
+                                    <li>You must remove this image to submit your listing</li>
+                                    <li className="font-medium text-red-600 mt-2">Take a photo of the actual material you're selling instead</li>
+                                  </ul>
+                                </div>
+                              )}
+                              
                               {warningType.includes('quality') && !warningType.includes('dark') && !warningType.includes('bright') && (
-                                <ul className="list-disc list-inside ml-2 mt-1 text-sm">
+                                <ul className="list-disc list-inside ml-2 mt-1 text-sm space-y-1 bg-gray-50 p-2 rounded-md">
                                   <li>Use the main camera instead of the front camera if possible</li>
                                   <li>Clean your camera lens before taking photos</li>
                                   <li>Make sure the camera resolution is set to high quality</li>
+                                  <li className="font-medium text-red-600">For best results: Use a recent smartphone with a good camera</li>
                                 </ul>
                               )}
                               
                               {warningType.includes('dark') && (
-                                <ul className="list-disc list-inside ml-2 mt-1 text-sm">
+                                <ul className="list-disc list-inside ml-2 mt-1 text-sm space-y-1 bg-gray-50 p-2 rounded-md">
                                   <li>Move to a well-lit area or turn on more lights</li>
                                   <li>Position yourself so light falls on the item, not behind it</li>
                                   <li>Try taking the photo during daylight hours near a window</li>
+                                  <li className="font-medium text-red-600">For best results: Use natural daylight whenever possible</li>
                                 </ul>
                               )}
                               
                               {warningType.includes('bright') && (
-                                <ul className="list-disc list-inside ml-2 mt-1 text-sm">
+                                <ul className="list-disc list-inside ml-2 mt-1 text-sm space-y-1 bg-gray-50 p-2 rounded-md">
                                   <li>Avoid direct sunlight on the item</li>
                                   <li>Turn off flash or move further away from the item</li>
                                   <li>Try taking the photo in more diffused lighting</li>
+                                  <li className="font-medium text-red-600">For best results: Find a shaded area or use curtains to diffuse sunlight</li>
                                 </ul>
                               )}
                               
                               {warningType.includes('suspicious') && (
-                                <ul className="list-disc list-inside ml-2 mt-1 text-sm">
+                                <ul className="list-disc list-inside ml-2 mt-1 text-sm space-y-1 bg-gray-50 p-2 rounded-md">
                                   <li>Make sure your photo shows only recyclable materials</li>
                                   <li>Remove any unrelated objects from the frame</li>
                                   <li>Take a close-up of just the item you're listing</li>
+                                  <li className="font-medium text-red-600">For best results: Focus on just the recyclable material</li>
                                 </ul>
                               )}
                               
@@ -784,24 +925,45 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
                                !warningType.includes('quality') &&
                                !warningType.includes('dark') &&
                                !warningType.includes('bright') &&
-                               !warningType.includes('suspicious'))) && (
-                                <ul className="list-disc list-inside ml-2 mt-1 text-sm">
+                               !warningType.includes('suspicious') &&
+                               !warningType.includes('document'))) && (
+                                <ul className="list-disc list-inside ml-2 mt-1 text-sm space-y-1 bg-gray-50 p-2 rounded-md">
                                   <li>Take your photo in good lighting conditions</li>
                                   <li>Make sure the item is clearly visible and fills most of the frame</li>
                                   <li>Use a high-quality camera and hold it steady</li>
                                   <li>Make sure you're photographing only recyclable materials</li>
+                                  <li className="font-medium text-red-600">For best results: Follow all image guidelines for better listings</li>
                                 </ul>
                               )}
                               
-                              {/* Add specific tips if available */}
-                              {warningDetails?.specificTips && warningDetails.specificTips.length > 0 && (
-                                <div className="mt-2 text-xs border-t border-red-100 pt-1">
-                                  <strong>AI detected:</strong>
-                                  <ul className="list-disc list-inside ml-2">
-                                    {warningDetails.specificTips.map((tip, i) => (
-                                      <li key={i}>{tip}</li>
-                                    ))}
-                                  </ul>
+                              {/* Display AI recommendations from the image if available */}
+                              {warningDetails?.fileName && (
+                                <div className="mt-3 text-xs border-t border-red-100 pt-2">
+                                  <div className="flex items-center">
+                                    <strong className="text-red-600 mr-1">AI image analysis:</strong>
+                                    <span className="bg-gray-100 px-1 rounded text-xs">{warningDetails.fileName}</span>
+                                  </div>
+                                  
+                                  {/* Show all recommendations for this image */}
+                                  {images.find(img => 
+                                    img.uploaded?.url.includes(warningDetails.fileName) && 
+                                    img.allRecommendations?.length > 0
+                                  )?.allRecommendations.map((rec, i) => (
+                                    <div key={i} className="mt-1 ml-2 text-gray-700">
+                                      {i === 0 ? <strong>• {rec}</strong> : `• ${rec}`}
+                                    </div>
+                                  ))}
+                                  
+                                  {/* Add specific tips if available */}
+                                  {warningDetails?.specificTips && warningDetails.specificTips.length > 0 && (
+                                    <div className="mt-2">
+                                      <ul className="list-disc list-inside ml-2">
+                                        {warningDetails.specificTips.map((tip, i) => (
+                                          <li key={i}>{tip}</li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -811,9 +973,44 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
                     </ul>
                   </div>
                   
-                  <div className="mt-3 text-sm border-t border-red-300 pt-2 flex items-center">
-                    <Camera className="h-4 w-4 mr-2 text-red-600" />
-                    <p>Our AI analyzes images for quality, content type, and clarity. Please upload images that clearly show your recyclable items.</p>
+                  <div className="mt-4 text-sm border-t border-red-300 pt-3">
+                    <div className="flex items-center mb-2">
+                      <Camera className="h-4 w-4 mr-2 text-red-600" />
+                      <p className="font-medium">EcoLoop AI Image Guidelines</p>
+                    </div>
+                    
+                    <div className="bg-white p-3 rounded-md shadow-sm border border-red-100">
+                      <p className="mb-2">For high-quality listings that get approved quickly:</p>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                        <div className="flex items-start">
+                          <CheckCircle className="h-3 w-3 text-green-500 mt-0.5 mr-1 flex-shrink-0" />
+                          <span>Use natural, even lighting (avoid harsh shadows)</span>
+                        </div>
+                        <div className="flex items-start">
+                          <CheckCircle className="h-3 w-3 text-green-500 mt-0.5 mr-1 flex-shrink-0" />
+                          <span>Ensure the item fills most of the frame</span>
+                        </div>
+                        <div className="flex items-start">
+                          <CheckCircle className="h-3 w-3 text-green-500 mt-0.5 mr-1 flex-shrink-0" />
+                          <span>Hold your camera steady or use a surface</span>
+                        </div>
+                        <div className="flex items-start">
+                          <CheckCircle className="h-3 w-3 text-green-500 mt-0.5 mr-1 flex-shrink-0" />
+                          <span>Use a plain background when possible</span>
+                        </div>
+                        <div className="flex items-start">
+                          <CheckCircle className="h-3 w-3 text-green-500 mt-0.5 mr-1 flex-shrink-0" />
+                          <span>Show only recyclable materials (no documents)</span>
+                        </div>
+                        <div className="flex items-start">
+                          <CheckCircle className="h-3 w-3 text-green-500 mt-0.5 mr-1 flex-shrink-0" />
+                          <span>Take photos from multiple angles</span>
+                        </div>
+                      </div>
+                      
+                      <p className="mt-3 text-xs text-gray-500">Our AI analyzes images for quality, content type, clarity, brightness, and more to ensure high-quality listings.</p>
+                    </div>
                   </div>
                 </AlertDescription>
               </Alert>
@@ -891,7 +1088,7 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
                         {image.aiAnalysis.status === 'usable' ? (
                           <Badge className="bg-green-100 text-green-800 text-xs">
                             <CheckCircle className="w-3 h-3 mr-1" />
-                            AI: {Math.round(image.aiAnalysis.confidence)}%
+                            AI: {Math.round(image.aiAnalysis.confidence)}% - Good Quality
                           </Badge>
                         ) : (
                           <div className="flex flex-col gap-1">
@@ -901,8 +1098,16 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
                             >
                               <AlertTriangle className="w-3 h-3 mr-1" />
                               {image.aiAnalysis.status === 'blurry' ? 'Blurry' : 
-                               image.aiAnalysis.status === 'low_quality' ? 'Low Quality' : 
+                               image.aiAnalysis.status === 'low_quality' ? 
+                                 image.aiAnalysis.specific_issue === 'too_dark' ? 'Too Dark' :
+                                 image.aiAnalysis.specific_issue === 'too_bright' ? 'Too Bright' :
+                                 image.aiAnalysis.specific_issue === 'too_small' ? 'Low Resolution' :
+                                 'Low Quality' : 
+                               image.aiAnalysis.status === 'inappropriate_content' ? 
+                                 image.aiAnalysis.specific_issue === 'document' ? 'Document Detected' :
+                                 'Inappropriate Content' :
                                image.aiAnalysis.status === 'suspicious' ? 'Review Needed' : 
+                               image.aiAnalysis.status === 'non_recyclable' ? 'Not Recyclable' :
                                image.aiAnalysis.status === 'low_confidence' ? 'Unclear Image' : 
                                image.aiAnalysis.status}
                               <span className="ml-1 text-xs">(Fix)</span>
@@ -913,6 +1118,19 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
                               <Badge className="bg-yellow-100 text-yellow-800 text-xs">
                                 {Math.round(image.aiAnalysis.confidence)}% Confidence
                               </Badge>
+                            )}
+                            
+                            {/* Show first recommendation as a tooltip */}
+                            {image.allRecommendations && image.allRecommendations.length > 0 && (
+                              <div className="absolute left-0 top-12 bg-white shadow-md p-2 rounded-md border border-red-200 text-xs max-w-[200px] opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                                <strong className="text-red-600 block mb-1">AI Feedback:</strong>
+                                <p className="text-gray-700">{image.allRecommendations[0]}</p>
+                                {image.allRecommendations.length > 1 && (
+                                  <span className="text-blue-600 block mt-1 cursor-pointer" onClick={() => scrollToWarnings()}>
+                                    View all recommendations →
+                                  </span>
+                                )}
+                              </div>
                             )}
                           </div>
                         )}
@@ -985,29 +1203,40 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
               </div>
             )}
           </div>
+        </div>
 
-          {/* Action Buttons */}
-          <div className="flex justify-end gap-3 pt-4 border-t">
-            <Button variant="outline" onClick={handleClose}>
-              Cancel
+        {/* Action Buttons */}
+        <div className="flex justify-end gap-3 pt-4 border-t">
+          <Button variant="outline" onClick={handleClose}>
+            Cancel
             </Button>
-            <Button 
-              onClick={handleSubmit} 
-              disabled={!isFormValid() || isSubmitting}
-              className="bg-green-600 hover:bg-green-700"
-            >
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Creating Listing...
-                </>
-              ) : (
-                <>
-                  <Camera className="w-4 h-4 mr-2" />
-                  List Item
-                </>
+            <div className="relative group">            <div className="relative group">
+              <Button 
+                onClick={handleSubmit} 
+                disabled={!isFormValid() || isSubmitting}
+                className="bg-green-600 hover:bg-green-700"
+              >
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Creating Listing...
+                  </>
+                ) : (
+                  <>
+                    <Camera className="w-4 h-4 mr-2" />
+                    List Item
+                  </>
+                )}
+              </Button>
+              
+              {/* Tooltip explaining why button is disabled if document images are present */}
+              {images.some(img => img.aiAnalysis?.status === 'inappropriate_content' || img.aiAnalysis?.specific_issue === 'document') && (
+                <div className="absolute bottom-full mb-2 right-0 w-64 p-2 bg-red-50 border border-red-200 rounded-md shadow-lg text-xs invisible group-hover:visible transition-all z-20">
+                  <p className="font-semibold text-red-600">Cannot submit with document images</p>
+                  <p className="mt-1">Please remove any images that were flagged as documents, certificates, or ID cards to proceed.</p>
+                </div>
               )}
-            </Button>
+            </div>
           </div>
         </div>
       </DialogContent>

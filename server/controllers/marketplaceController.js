@@ -5,7 +5,7 @@ import { uploadMultipleImages, deleteMultipleImages } from '../utils/cloudinary.
 import axios from 'axios';
 
 // Configuration for AI image analysis service
-const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:5000';
+const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:5001';
 
 // @desc    Analyze image using AI microservice
 // @route   Helper function

@@ -8,7 +8,7 @@ import axios from 'axios';
 const router = express.Router();
 
 // Configuration for AI image analysis service - same as in marketplaceController.js
-const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:5000';
+const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:5001';
 
 // Helper function to analyze image with AI
 const analyzeImageWithAI = async (imageUrl) => {
