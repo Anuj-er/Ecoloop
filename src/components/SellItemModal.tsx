@@ -49,6 +49,10 @@ interface ImageUpload {
     specific_issue?: string;
     document_detection_method?: string;
     document_confidence?: number;
+    quality_analysis?: {
+      quality_score: number;
+      issues: string[];
+    };
   };
   uploading?: boolean;
   analyzing?: boolean;
@@ -194,10 +198,16 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
                   label: aiResult.label || 'unknown',
                   confidence: aiResult.confidence || 50,
                   status: aiResult.status || 'usable',
-                  recommendations: aiResult.recommendations || []
+                  recommendations: aiResult.recommendations || [],
+                  specific_issue: aiResult.specific_issue || '',
+                  quality_analysis: aiResult.quality_analysis || null,
+                  document_detection_method: aiResult.document_detection_method || '',
+                  document_confidence: aiResult.document_confidence || 0
                 }
               } : img
-            ));              // If there's an issue, show a warning about this specific image
+            ));              
+            
+            // If there's an issue, show a warning about this specific image
             if (aiResult.status && aiResult.status !== 'usable') {
               const fileName = uploadedImage.url.split('/').pop().split('?')[0];
               
@@ -206,63 +216,67 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
               let toastDuration = 6000; // Longer duration for more complex warnings
               let warningDetails = '';
               
+              // Check if the image is rejected (automatic block) and make warning more prominent
+              const isRejected = aiResult.status === 'rejected';
+              
               // Add confidence metrics to provide more specific feedback
               const confidenceMetrics = aiResult.confidence_metrics || {};
+              const qualityAnalysis = aiResult.quality_analysis || {};
               
+              // Use recommendations from AI service directly if available
               if (aiResult.recommendations && aiResult.recommendations.length > 0) {
                 warningMessage = aiResult.recommendations[0];
                 
                 // Add additional context based on metrics if available
-                if (aiResult.status === 'blurry' && confidenceMetrics.blur_score) {
-                  warningDetails = `Blur score: ${confidenceMetrics.blur_score.toFixed(1)}/100`;
-                } else if (aiResult.status === 'low_quality' && aiResult.specific_issue === 'too_dark' && 
-                           confidenceMetrics.brightness !== undefined) {
-                  warningDetails = `Brightness: ${confidenceMetrics.brightness.toFixed(1)}/255`;
-                } else if (aiResult.status === 'low_quality' && aiResult.specific_issue === 'too_bright' && 
-                           confidenceMetrics.brightness !== undefined) {
-                  warningDetails = `Brightness: ${confidenceMetrics.brightness.toFixed(1)}/255`;
-                } else if (aiResult.status === 'low_quality' && aiResult.specific_issue === 'too_small' && 
-                           confidenceMetrics.dimensions) {
-                  warningDetails = `Dimensions: ${confidenceMetrics.dimensions}`;
-                } else if (aiResult.status === 'inappropriate_content' && aiResult.specific_issue === 'document' && 
-                           confidenceMetrics.document_confidence !== undefined) {
-                  warningDetails = `Document confidence: ${confidenceMetrics.document_confidence.toFixed(1)}%`;
+                if (aiResult.specific_issue === 'blurry' && qualityAnalysis.blur_score) {
+                  warningDetails = `Blur score: ${qualityAnalysis.blur_score.toFixed(1)}/100`;
+                } else if (aiResult.specific_issue === 'too_dark' && qualityAnalysis.brightness !== undefined) {
+                  warningDetails = `Brightness: ${qualityAnalysis.brightness.toFixed(1)}/255`;
+                } else if (aiResult.specific_issue === 'too_bright' && qualityAnalysis.brightness !== undefined) {
+                  warningDetails = `Brightness: ${qualityAnalysis.brightness.toFixed(1)}/255`;
+                } else if (aiResult.specific_issue === 'too_small' && qualityAnalysis.dimensions) {
+                  warningDetails = `Dimensions: ${qualityAnalysis.dimensions}`;
+                } else if (aiResult.specific_issue === 'document' && aiResult.document_confidence !== undefined) {
+                  warningDetails = `Document confidence: ${aiResult.document_confidence.toFixed(1)}%`;
                 }
               } else {
-                // Fallback if no recommendations with improved details
-                if (documentDetected || aiResult.status === 'inappropriate_content') {
+                // Fallback if no recommendations
+                const documentDetected = aiResult.specific_issue === 'document' || 
+                                        aiResult.status === 'inappropriate_content';
+                
+                if (documentDetected) {
                   const docType = aiResult.document_analysis?.document_type || 'document';
                   warningMessage = `Image "${fileName}" appears to be a ${docType} rather than a recyclable item.`;
                   
-                  if (confidenceMetrics.document_confidence !== undefined) {
-                    warningDetails = `Document confidence: ${confidenceMetrics.document_confidence.toFixed(1)}%`;
+                  if (aiResult.document_confidence !== undefined) {
+                    warningDetails = `Document confidence: ${aiResult.document_confidence.toFixed(1)}%`;
                   }
-                } else if (aiResult.status === 'blurry') {
+                } else if (aiResult.specific_issue === 'blurry' || aiResult.status === 'blurry') {
                   warningMessage = `Image "${fileName}" appears blurry and needs to be retaken.`;
                   
-                  if (confidenceMetrics.blur_score !== undefined) {
-                    warningDetails = `Blur score: ${confidenceMetrics.blur_score.toFixed(1)}/100`;
+                  if (qualityAnalysis.blur_score !== undefined) {
+                    warningDetails = `Blur score: ${qualityAnalysis.blur_score.toFixed(1)}/100`;
                   }
-                } else if (aiResult.status === 'low_quality') {
+                } else if (aiResult.specific_issue === 'low_quality' || aiResult.status === 'low_quality') {
                   warningMessage = `Image "${fileName}" has low quality.`;
                   
                   if (aiResult.specific_issue === 'too_dark') {
                     warningMessage += ' (too dark)';
-                    if (confidenceMetrics.brightness !== undefined) {
-                      warningDetails = `Brightness: ${confidenceMetrics.brightness.toFixed(1)}/255`;
+                    if (qualityAnalysis.brightness !== undefined) {
+                      warningDetails = `Brightness: ${qualityAnalysis.brightness.toFixed(1)}/255`;
                     }
                   } else if (aiResult.specific_issue === 'too_bright') {
                     warningMessage += ' (too bright/washed out)';
-                    if (confidenceMetrics.brightness !== undefined) {
-                      warningDetails = `Brightness: ${confidenceMetrics.brightness.toFixed(1)}/255`;
+                    if (qualityAnalysis.brightness !== undefined) {
+                      warningDetails = `Brightness: ${qualityAnalysis.brightness.toFixed(1)}/255`;
                     }
                   } else if (aiResult.specific_issue === 'too_small') {
                     warningMessage += ' (resolution too low)';
-                    if (confidenceMetrics.dimensions) {
-                      warningDetails = `Dimensions: ${confidenceMetrics.dimensions}`;
+                    if (qualityAnalysis.dimensions) {
+                      warningDetails = `Dimensions: ${qualityAnalysis.dimensions}`;
                     }
                   }
-                } else if (aiResult.status === 'suspicious') {
+                } else if (aiResult.status === 'suspicious' || aiResult.status === 'pending_review') {
                   warningMessage = `Image "${fileName}" contains content that doesn't appear to be recyclable material.`;
                   if (aiResult.suspicious_analysis?.indicators?.length > 0) {
                     warningDetails = `Issues: ${aiResult.suspicious_analysis.indicators.join(', ')}`;
@@ -279,13 +293,24 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
                   ? `${warningMessage}\n${warningDetails}`
                   : warningMessage;
                   
-                toast.warning(finalMessage, { 
-                  duration: toastDuration,
-                  action: {
-                    label: "Fix It",
-                    onClick: () => scrollToWarnings()
-                  }
-                });
+                // Use error toast for rejected images, warning for others
+                if (isRejected) {
+                  toast.error(finalMessage, { 
+                    duration: toastDuration,
+                    action: {
+                      label: "Fix It",
+                      onClick: () => scrollToWarnings()
+                    }
+                  });
+                } else {
+                  toast.warning(finalMessage, { 
+                    duration: toastDuration,
+                    action: {
+                      label: "Fix It",
+                      onClick: () => scrollToWarnings()
+                    }
+                  });
+                }
               }
               
               // Store all recommendations in image data for displaying in UI
@@ -376,15 +401,16 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
   };
 
   const isFormValid = () => {
-    // Check if we have document/inappropriate images that should be rejected outright
+    // Check if we have rejected images that should be blocked outright
     const hasRejectedImages = images.some(img => 
+      img.aiAnalysis?.status === 'rejected' ||
       img.aiAnalysis?.status === 'inappropriate_content' || 
       img.aiAnalysis?.specific_issue === 'document'
     );
     
     if (hasRejectedImages) {
-      // Images with documents or inappropriate content are strictly blocked
-      console.log('Form validation failed: Found document or inappropriate content in images');
+      // Images that are rejected cannot be submitted
+      console.log('Form validation failed: Found rejected images (documents/inappropriate content/other issues)');
       return false;
     }
     
@@ -412,14 +438,29 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Double check for document images to ensure they can't be submitted
-    const hasDocumentImages = images.some(img => 
+    // Double check for rejected images to ensure they can't be submitted
+    const rejectedImages = images.filter(img => 
+      img.aiAnalysis?.status === 'rejected' ||
       img.aiAnalysis?.status === 'inappropriate_content' || 
       img.aiAnalysis?.specific_issue === 'document'
     );
     
-    if (hasDocumentImages) {
-      toast.error('Cannot submit with document or certificate images. Please remove these images.');
+    if (rejectedImages.length > 0) {
+      // Get the specific reasons for rejection from the recommendations
+      const rejectionReasons = rejectedImages
+        .map(img => {
+          if (img.aiAnalysis?.recommendations && img.aiAnalysis.recommendations.length > 0) {
+            return img.aiAnalysis.recommendations[0];
+          }
+          return img.aiAnalysis?.status === 'inappropriate_content' ? 
+            'Contains inappropriate content' : 
+            img.aiAnalysis?.specific_issue === 'document' ?
+            'Contains document or certificate images' :
+            'Image rejected by AI analysis';
+        })
+        .join(', ');
+        
+      toast.error(`Cannot submit with rejected images. ${rejectionReasons} Please remove these images.`);
       scrollToWarnings();
       return;
     }
@@ -1093,20 +1134,19 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
                         ) : (
                           <div className="flex flex-col gap-1">
                             <Badge 
-                              className="bg-red-100 text-red-800 text-xs cursor-pointer hover:bg-red-200"
+                              className={`${image.aiAnalysis.status === 'rejected' ? 'bg-red-200 text-red-900' : 'bg-red-100 text-red-800'} text-xs cursor-pointer hover:bg-red-200`}
                               onClick={() => scrollToWarnings()}
                             >
                               <AlertTriangle className="w-3 h-3 mr-1" />
-                              {image.aiAnalysis.status === 'blurry' ? 'Blurry' : 
-                               image.aiAnalysis.status === 'low_quality' ? 
-                                 image.aiAnalysis.specific_issue === 'too_dark' ? 'Too Dark' :
-                                 image.aiAnalysis.specific_issue === 'too_bright' ? 'Too Bright' :
-                                 image.aiAnalysis.specific_issue === 'too_small' ? 'Low Resolution' :
-                                 'Low Quality' : 
-                               image.aiAnalysis.status === 'inappropriate_content' ? 
-                                 image.aiAnalysis.specific_issue === 'document' ? 'Document Detected' :
-                                 'Inappropriate Content' :
-                               image.aiAnalysis.status === 'suspicious' ? 'Review Needed' : 
+                              {image.aiAnalysis.status === 'rejected' ? '❌ Rejected: ' : ''}
+                              {image.aiAnalysis.specific_issue === 'blurry' || image.aiAnalysis.status === 'blurry' ? 'Blurry' : 
+                               image.aiAnalysis.specific_issue === 'too_dark' ? 'Too Dark' :
+                               image.aiAnalysis.specific_issue === 'too_bright' ? 'Too Bright' :
+                               image.aiAnalysis.specific_issue === 'too_small' ? 'Low Resolution' :
+                               image.aiAnalysis.specific_issue === 'low_quality' || image.aiAnalysis.status === 'low_quality' ? 'Low Quality' : 
+                               image.aiAnalysis.specific_issue === 'document' ? 'Document Detected' :
+                               image.aiAnalysis.status === 'inappropriate_content' ? 'Inappropriate Content' :
+                               image.aiAnalysis.status === 'pending_review' || image.aiAnalysis.status === 'suspicious' ? 'Review Needed' : 
                                image.aiAnalysis.status === 'non_recyclable' ? 'Not Recyclable' :
                                image.aiAnalysis.status === 'low_confidence' ? 'Unclear Image' : 
                                image.aiAnalysis.status}

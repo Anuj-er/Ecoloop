@@ -13,9 +13,6 @@ import { Profile } from "./components/Profile";
 import { NotificationToast } from "./components/NotificationToast";
 import { FraudDetectionDashboard } from "./components/FraudDetectionDashboard";
 import { Marketplace } from "./components/Marketplace";
-import { MarketplaceSimple } from "./components/MarketplaceSimple";
-import { MarketplaceDebug } from "./components/MarketplaceDebug";
-import { MarketplaceApiTest } from "./components/MarketplaceApiTest";
 import { MarketplaceAdminDashboard } from "./components/MarketplaceAdminDashboard";
 
 const queryClient = new QueryClient();
@@ -34,14 +31,7 @@ const App = () => (
             <Route path="/register" element={<Register />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/marketplace" element={<Marketplace />} />
-            {/* Debug routes - only available in development */}
-            {import.meta.env.DEV && (
-              <>
-                <Route path="/marketplace-simple" element={<MarketplaceSimple />} />
-                <Route path="/marketplace-debug" element={<MarketplaceDebug />} />
-                <Route path="/marketplace-api-test" element={<MarketplaceApiTest />} />
-              </>
-            )}
+            {/* Debug routes removed */}
             <Route path="/admin/fraud-detection" element={<FraudDetectionDashboard />} />
             <Route path="/admin/marketplace" element={<MarketplaceAdminDashboard />} />
             <Route path="/" element={<Index />} />
