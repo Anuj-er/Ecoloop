@@ -185,9 +185,12 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
             const aiResult = aiResponse.data;
             console.log('Real-time AI analysis:', aiResult);
             
-            // Check document detection status - the enhanced backend already handles this
-            const documentDetected = aiResult.status === 'inappropriate_content' && 
-                                     aiResult.specific_issue === 'document';
+            // Handle the simplified response format from our AI service
+            const status = aiResult.status; // 'approved', 'review', 'rejected'
+            const message = aiResult.message || 'Analysis complete';
+            const confidence = aiResult.confidence || 0;
+            const category = aiResult.category || 'unknown';
+            const detectedItem = aiResult.detected_item || 'unknown';
             
             // Update image with AI analysis results
             setImages(prev => prev.map((img, i) => 
@@ -195,132 +198,49 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
                 ...img,
                 analyzing: false,
                 aiAnalysis: {
-                  label: aiResult.label || 'unknown',
-                  confidence: aiResult.confidence || 50,
-                  status: aiResult.status || 'usable',
-                  recommendations: aiResult.recommendations || [],
-                  specific_issue: aiResult.specific_issue || '',
-                  quality_analysis: aiResult.quality_analysis || null,
-                  document_detection_method: aiResult.document_detection_method || '',
-                  document_confidence: aiResult.document_confidence || 0
+                  label: detectedItem,
+                  confidence: confidence,
+                  status: status,
+                  recommendations: [message],
+                  specific_issue: aiResult.reason || '',
+                  quality_analysis: {
+                    quality_score: confidence,
+                    issues: status === 'rejected' ? [aiResult.reason || 'Quality issue'] : []
+                  }
                 }
               } : img
             ));              
             
-            // If there's an issue, show a warning about this specific image
-            if (aiResult.status && aiResult.status !== 'usable') {
-              const fileName = uploadedImage.url.split('/').pop().split('?')[0];
-              
-              // Get the first recommendation as our warning message (more specific)
-              let warningMessage = '';
-              let toastDuration = 6000; // Longer duration for more complex warnings
-              let warningDetails = '';
-              
-              // Check if the image is rejected (automatic block) and make warning more prominent
-              const isRejected = aiResult.status === 'rejected';
-              
-              // Add confidence metrics to provide more specific feedback
-              const confidenceMetrics = aiResult.confidence_metrics || {};
-              const qualityAnalysis = aiResult.quality_analysis || {};
-              
-              // Use recommendations from AI service directly if available
-              if (aiResult.recommendations && aiResult.recommendations.length > 0) {
-                warningMessage = aiResult.recommendations[0];
-                
-                // Add additional context based on metrics if available
-                if (aiResult.specific_issue === 'blurry' && qualityAnalysis.blur_score) {
-                  warningDetails = `Blur score: ${qualityAnalysis.blur_score.toFixed(1)}/100`;
-                } else if (aiResult.specific_issue === 'too_dark' && qualityAnalysis.brightness !== undefined) {
-                  warningDetails = `Brightness: ${qualityAnalysis.brightness.toFixed(1)}/255`;
-                } else if (aiResult.specific_issue === 'too_bright' && qualityAnalysis.brightness !== undefined) {
-                  warningDetails = `Brightness: ${qualityAnalysis.brightness.toFixed(1)}/255`;
-                } else if (aiResult.specific_issue === 'too_small' && qualityAnalysis.dimensions) {
-                  warningDetails = `Dimensions: ${qualityAnalysis.dimensions}`;
-                } else if (aiResult.specific_issue === 'document' && aiResult.document_confidence !== undefined) {
-                  warningDetails = `Document confidence: ${aiResult.document_confidence.toFixed(1)}%`;
+            // Show user-friendly feedback based on status
+            if (status === 'approved') {
+              toast.success(`✅ ${message}`, { 
+                duration: 4000
+              });
+            } else if (status === 'review') {
+              toast.warning(`⚠️ ${message}`, { 
+                duration: 6000,
+                action: {
+                  label: "Details",
+                  onClick: () => console.log('Review details:', aiResult)
                 }
-              } else {
-                // Fallback if no recommendations
-                const documentDetected = aiResult.specific_issue === 'document' || 
-                                        aiResult.status === 'inappropriate_content';
-                
-                if (documentDetected) {
-                  const docType = aiResult.document_analysis?.document_type || 'document';
-                  warningMessage = `Image "${fileName}" appears to be a ${docType} rather than a recyclable item.`;
-                  
-                  if (aiResult.document_confidence !== undefined) {
-                    warningDetails = `Document confidence: ${aiResult.document_confidence.toFixed(1)}%`;
-                  }
-                } else if (aiResult.specific_issue === 'blurry' || aiResult.status === 'blurry') {
-                  warningMessage = `Image "${fileName}" appears blurry and needs to be retaken.`;
-                  
-                  if (qualityAnalysis.blur_score !== undefined) {
-                    warningDetails = `Blur score: ${qualityAnalysis.blur_score.toFixed(1)}/100`;
-                  }
-                } else if (aiResult.specific_issue === 'low_quality' || aiResult.status === 'low_quality') {
-                  warningMessage = `Image "${fileName}" has low quality.`;
-                  
-                  if (aiResult.specific_issue === 'too_dark') {
-                    warningMessage += ' (too dark)';
-                    if (qualityAnalysis.brightness !== undefined) {
-                      warningDetails = `Brightness: ${qualityAnalysis.brightness.toFixed(1)}/255`;
-                    }
-                  } else if (aiResult.specific_issue === 'too_bright') {
-                    warningMessage += ' (too bright/washed out)';
-                    if (qualityAnalysis.brightness !== undefined) {
-                      warningDetails = `Brightness: ${qualityAnalysis.brightness.toFixed(1)}/255`;
-                    }
-                  } else if (aiResult.specific_issue === 'too_small') {
-                    warningMessage += ' (resolution too low)';
-                    if (qualityAnalysis.dimensions) {
-                      warningDetails = `Dimensions: ${qualityAnalysis.dimensions}`;
-                    }
-                  }
-                } else if (aiResult.status === 'suspicious' || aiResult.status === 'pending_review') {
-                  warningMessage = `Image "${fileName}" contains content that doesn't appear to be recyclable material.`;
-                  if (aiResult.suspicious_analysis?.indicators?.length > 0) {
-                    warningDetails = `Issues: ${aiResult.suspicious_analysis.indicators.join(', ')}`;
-                  }
-                } else if (aiResult.status === 'low_confidence') {
-                  warningMessage = `Image "${fileName}" couldn't be clearly identified (${aiResult.confidence?.toFixed(1)}% confidence).`;
+              });
+            } else if (status === 'rejected') {
+              toast.error(`❌ ${message}`, { 
+                duration: 8000,
+                action: {
+                  label: "Remove",
+                  onClick: () => removeImage(index)
                 }
-              }
-              
-              // Display a toast with detailed information
-              if (warningMessage) {
-                // Create a richer toast message with details if available
-                const finalMessage = warningDetails 
-                  ? `${warningMessage}\n${warningDetails}`
-                  : warningMessage;
-                  
-                // Use error toast for rejected images, warning for others
-                if (isRejected) {
-                  toast.error(finalMessage, { 
-                    duration: toastDuration,
-                    action: {
-                      label: "Fix It",
-                      onClick: () => scrollToWarnings()
-                    }
-                  });
-                } else {
-                  toast.warning(finalMessage, { 
-                    duration: toastDuration,
-                    action: {
-                      label: "Fix It",
-                      onClick: () => scrollToWarnings()
-                    }
-                  });
-                }
-              }
-              
-              // Store all recommendations in image data for displaying in UI
-              setImages(prev => prev.map((img, i) => 
-                i === index ? {
-                  ...img,
-                  allRecommendations: aiResult.recommendations || []
-                } : img
-              ));
+              });
             }
+            
+            // Store recommendations for UI display
+            setImages(prev => prev.map((img, i) => 
+              i === index ? {
+                ...img,
+                allRecommendations: [message]
+              } : img
+            ));
           } else {
             // Fallback if analysis fails
             setImages(prev => prev.map((img, i) => 
@@ -330,7 +250,7 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
                 aiAnalysis: {
                   label: 'pending',
                   confidence: 75,
-                  status: 'usable',
+                  status: 'review',
                   recommendations: ['Full analysis will happen on submission']
                 }
               } : img
@@ -1126,53 +1046,31 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
                     {/* AI Status */}
                     {image.aiAnalysis && (
                       <div className="absolute top-2 left-2">
-                        {image.aiAnalysis.status === 'usable' ? (
-                          <Badge className="bg-green-100 text-green-800 text-xs">
-                            <CheckCircle className="w-3 h-3 mr-1" />
-                            AI: {Math.round(image.aiAnalysis.confidence)}% - Good Quality
+                        {image.aiAnalysis.status === 'approved' ? (
+                          <Badge className="bg-green-500 text-white text-sm font-bold border-2 border-green-600 shadow-lg">
+                            <CheckCircle className="w-4 h-4 mr-1" />
+                            APPROVED
+                          </Badge>
+                        ) : image.aiAnalysis.status === 'review' ? (
+                          <Badge className="bg-yellow-500 text-white text-sm font-bold border-2 border-yellow-600 shadow-lg">
+                            <AlertTriangle className="w-4 h-4 mr-1" />
+                            UNDER REVIEW
+                          </Badge>
+                        ) : image.aiAnalysis.status === 'rejected' ? (
+                          <Badge className="bg-red-500 text-white text-sm font-bold border-2 border-red-600 shadow-lg">
+                            <X className="w-4 h-4 mr-1" />
+                            REJECTED
+                          </Badge>
+                        ) : image.aiAnalysis.status === 'usable' ? (
+                          <Badge className="bg-green-500 text-white text-sm font-bold border-2 border-green-600 shadow-lg">
+                            <CheckCircle className="w-4 h-4 mr-1" />
+                            APPROVED
                           </Badge>
                         ) : (
-                          <div className="flex flex-col gap-1">
-                            <Badge 
-                              className={`${image.aiAnalysis.status === 'rejected' ? 'bg-red-200 text-red-900' : 'bg-red-100 text-red-800'} text-xs cursor-pointer hover:bg-red-200`}
-                              onClick={() => scrollToWarnings()}
-                            >
-                              <AlertTriangle className="w-3 h-3 mr-1" />
-                              {image.aiAnalysis.status === 'rejected' ? '❌ Rejected: ' : ''}
-                              {image.aiAnalysis.specific_issue === 'blurry' || image.aiAnalysis.status === 'blurry' ? 'Blurry' : 
-                               image.aiAnalysis.specific_issue === 'too_dark' ? 'Too Dark' :
-                               image.aiAnalysis.specific_issue === 'too_bright' ? 'Too Bright' :
-                               image.aiAnalysis.specific_issue === 'too_small' ? 'Low Resolution' :
-                               image.aiAnalysis.specific_issue === 'low_quality' || image.aiAnalysis.status === 'low_quality' ? 'Low Quality' : 
-                               image.aiAnalysis.specific_issue === 'document' ? 'Document Detected' :
-                               image.aiAnalysis.status === 'inappropriate_content' ? 'Inappropriate Content' :
-                               image.aiAnalysis.status === 'pending_review' || image.aiAnalysis.status === 'suspicious' ? 'Review Needed' : 
-                               image.aiAnalysis.status === 'non_recyclable' ? 'Not Recyclable' :
-                               image.aiAnalysis.status === 'low_confidence' ? 'Unclear Image' : 
-                               image.aiAnalysis.status}
-                              <span className="ml-1 text-xs">(Fix)</span>
-                            </Badge>
-                            
-                            {/* Show confidence separately if it's low */}
-                            {image.aiAnalysis.confidence < 50 && (
-                              <Badge className="bg-yellow-100 text-yellow-800 text-xs">
-                                {Math.round(image.aiAnalysis.confidence)}% Confidence
-                              </Badge>
-                            )}
-                            
-                            {/* Show first recommendation as a tooltip */}
-                            {image.allRecommendations && image.allRecommendations.length > 0 && (
-                              <div className="absolute left-0 top-12 bg-white shadow-md p-2 rounded-md border border-red-200 text-xs max-w-[200px] opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                                <strong className="text-red-600 block mb-1">AI Feedback:</strong>
-                                <p className="text-gray-700">{image.allRecommendations[0]}</p>
-                                {image.allRecommendations.length > 1 && (
-                                  <span className="text-blue-600 block mt-1 cursor-pointer" onClick={() => scrollToWarnings()}>
-                                    View all recommendations →
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                          </div>
+                          <Badge className="bg-yellow-500 text-white text-sm font-bold border-2 border-yellow-600 shadow-lg">
+                            <AlertTriangle className="w-4 h-4 mr-1" />
+                            UNDER REVIEW
+                          </Badge>
                         )}
                       </div>
                     )}

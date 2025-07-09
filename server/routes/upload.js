@@ -15,7 +15,7 @@ const analyzeImageWithAI = async (imageUrl) => {
   try {
     console.log(`Sending image to AI service for analysis: ${imageUrl}`);
     
-    const response = await axios.post(`${AI_SERVICE_URL}/predict`, {
+    const response = await axios.post(`${AI_SERVICE_URL}/analyze-marketplace`, {
       image_url: imageUrl
     }, {
       timeout: 15000, // 15 second timeout
@@ -31,11 +31,11 @@ const analyzeImageWithAI = async (imageUrl) => {
     
     // If AI service is unavailable, return a default "safe" response
     return {
-      label: 'unknown',
-      confidence: 50,
-      status: 'usable',
-      qualityScore: 75,
-      error: 'AI service unavailable'
+      status: 'review',
+      message: 'AI service unavailable - image sent for manual review',
+      confidence: 0,
+      category: 'unknown',
+      detected_item: 'unknown'
     };
   }
 };
