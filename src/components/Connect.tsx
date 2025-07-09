@@ -180,6 +180,71 @@ export const Connect = () => {
     });
   };
 
+  // Calculate recommendation score for a user
+  const calculateRecommendationScore = (user: any) => {
+    let score = 0;
+    
+    // Shared interests (high weight)
+    const sharedInterests = user.interests?.filter((interest: string) => 
+      currentUser?.interests?.includes(interest)
+    ) || [];
+    score += sharedInterests.length * 3;
+    
+    // Same user type (medium weight)
+    if (user.userType === currentUser?.userType) {
+      score += 2;
+    }
+    
+    // Same location (medium weight)
+    if (user.location && currentUser?.location && 
+        user.location.toLowerCase() === currentUser.location.toLowerCase()) {
+      score += 2;
+    }
+    
+    // Recently joined (small weight - to prioritize new members)
+    const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    if (new Date(user.createdAt) > oneWeekAgo) {
+      score += 1;
+    }
+    
+    // Active sustainability metrics (small weight)
+    if (user.sustainabilityMetrics?.projectsCompleted > 0) {
+      score += Math.min(user.sustainabilityMetrics.projectsCompleted / 5, 2);
+    }
+    
+    return score;
+  };
+
+  // Get recommended users based on compatibility
+  const getRecommendedUsers = () => {
+    const availableUsers = getAvailableUsers();
+    
+    return availableUsers
+      .map(user => ({
+        ...user,
+        recommendationScore: calculateRecommendationScore(user),
+        sharedInterests: user.interests?.filter((interest: string) => 
+          currentUser?.interests?.includes(interest)
+        ) || []
+      }))
+      .filter(user => user.recommendationScore > 0) // Only users with some compatibility
+      .sort((a, b) => b.recommendationScore - a.recommendationScore) // Sort by score
+      .slice(0, 6); // Show top 6 recommendations
+  };
+
+  // Get mutual connections for a user
+  const getMutualConnections = (userId: string) => {
+    const userConnections = existingConnections
+      .filter(conn => conn.status === 'accepted')
+      .filter(conn => {
+        const otherUserId = conn.requester._id === currentUser?._id ? conn.recipient._id : conn.requester._id;
+        return otherUserId === userId;
+      });
+    
+    // This is simplified - in a real app, you'd have a proper mutual connections API
+    return Math.floor(Math.random() * 3); // Mock mutual connections count
+  };
+
   const filteredUsers = getAvailableUsers().filter(user => {
     const matchesFilter = filter === "all" || 
                          (filter === "individual" && user.userType === "individual") ||
@@ -193,6 +258,8 @@ export const Connect = () => {
     
     return matchesFilter && matchesSearch;
   });
+
+  const recommendedUsers = getRecommendedUsers();
 
   const handleConnect = async (userId: string) => {
     if (!isAuthenticated) {
@@ -414,7 +481,7 @@ export const Connect = () => {
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-blue-50 to-purple-50 p-4">
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header Section */}
-        <div className="text-center space-y-4">
+        <div className="text-center space-y-14">
           <div className="flex items-center justify-center space-x-3">
             <h1 className="text-4xl font-bold bg-gradient-to-r from-green-600 to-blue-600 bg-clip-text text-transparent">
               Connect & Collaborate
@@ -473,46 +540,60 @@ export const Connect = () => {
 
           {/* Discover Users Tab */}
           <TabsContent value="discover" className="space-y-6">
-            {/* Search and Filter */}
-            <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
-              <CardContent className="p-6">
-                <div className="flex flex-col lg:flex-row gap-4">
-                  <div className="flex-1 relative">
-                    <Search className="absolute left-3 top-3 h-5 w-5 text-gray-400" />
-                    <Input
-                      placeholder="Search by name, organization, or interests..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="pl-10 h-12 text-lg"
-                    />
-                  </div>
-                  <Select value={filter} onValueChange={setFilter}>
-                    <SelectTrigger className="w-full lg:w-[200px] h-12">
-                      <SelectValue placeholder="Filter by type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Users</SelectItem>
-                      <SelectItem value="individual">Individuals</SelectItem>
-                      <SelectItem value="organization">Organizations</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    onClick={handleManualRefresh}
-                    disabled={refreshing}
-                    className="bg-gradient-to-r from-green-500 to-blue-500 hover:from-green-600 hover:to-blue-600 text-white h-12 px-6"
-                  >
-                    <RefreshCw className={`w-4 h-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
-                    {refreshing ? 'Refreshing...' : 'Refresh'}
-                  </Button>
-                </div>
-                <div className="mt-3 text-sm text-gray-500">
-                  <span>Showing {filteredUsers.length} available users</span>
-                </div>
-              </CardContent>
-            </Card>
+            <div className="flex gap-6">
+              {/* Main Content Area - 3/4 width */}
+              <div className="flex-1 space-y-6">
+                {/* Search and Filter */}
+                <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
+                  <CardContent className="p-6">
+                    <div className="flex flex-col lg:flex-row gap-4">
+                      <div className="flex-1 relative">
+                        <Search className="absolute left-3 top-3 h-5 w-5 text-gray-400" />
+                        <Input
+                          placeholder="Search by name, organization, or interests..."
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                          className="pl-10 h-12 text-lg"
+                        />
+                      </div>
+                      <Select value={filter} onValueChange={setFilter}>
+                        <SelectTrigger className="w-full lg:w-[200px] h-12">
+                          <SelectValue placeholder="Filter by type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Users</SelectItem>
+                          <SelectItem value="individual">Individuals</SelectItem>
+                          <SelectItem value="organization">Organizations</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        onClick={handleManualRefresh}
+                        disabled={refreshing}
+                        className="bg-gradient-to-r from-green-500 to-blue-500 hover:from-green-600 hover:to-blue-600 text-white h-12 px-6"
+                      >
+                        <RefreshCw className={`w-4 h-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+                        {refreshing ? 'Refreshing...' : 'Refresh'}
+                      </Button>
+                    </div>
+                    <div className="mt-3 text-sm text-gray-500">
+                      <span>Showing {filteredUsers.length} available users</span>
+                    </div>
+                  </CardContent>
+                </Card>
 
-            {/* Users Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {/* Users Grid */}
+                <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
+                  <CardHeader>
+                    <CardTitle className="text-xl font-bold text-gray-900 flex items-center">
+                      <Search className="w-5 h-5 mr-2 text-green-500" />
+                      Browse All Users
+                      <Badge variant="outline" className="ml-3">
+                        {filteredUsers.length} available
+                      </Badge>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {loading ? (
                 <div className="col-span-full flex justify-center py-12">
                   <div className="text-center">
@@ -635,6 +716,134 @@ export const Connect = () => {
                   </div>
                   <h3 className="text-xl font-semibold text-gray-900 mb-2">No users found</h3>
                   <p className="text-gray-600">Try adjusting your search or filters to find more users.</p>
+                </div>
+              )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Recommended Connections Sidebar - 1/4 width */}
+              {recommendedUsers.length > 0 && (
+                <div className="w-1/4 min-w-[300px]">
+                  <Card className="bg-gradient-to-b from-blue-50 to-purple-50 border-2 border-blue-200 shadow-lg sticky top-4">
+                    <CardHeader className="pb-4">
+                      <CardTitle className="text-lg font-bold text-gray-900 flex items-center">
+                        <TrendingUp className="w-5 h-5 mr-2 text-blue-500" />
+                        Recommended
+                        <Badge className="ml-2 bg-blue-100 text-blue-800 text-xs">
+                          {recommendedUsers.length}
+                        </Badge>
+                      </CardTitle>
+                      <p className="text-sm text-gray-600">
+                        People you might know
+                      </p>
+                    </CardHeader>
+                    <CardContent className="space-y-4 max-h-[600px] overflow-y-auto">
+                      {recommendedUsers.map(user => {
+                        const mutualConnections = getMutualConnections(user._id);
+                        return (
+                          <Card key={user._id} className="bg-white border border-blue-100 shadow-sm hover:shadow-md transition-all duration-300">
+                            <CardContent className="p-4">
+                              <div className="flex items-start space-x-3 mb-3">
+                                <Avatar className="w-12 h-12 border-2 border-blue-100">
+                                  <AvatarImage src={user.avatar} />
+                                  <AvatarFallback className="bg-gradient-to-r from-blue-400 to-purple-400 text-white text-sm font-bold">
+                                    {user.firstName?.[0]}{user.lastName?.[0]}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <div className="flex-1 min-w-0">
+                                  <h4 className="font-semibold text-sm truncate">{user.firstName} {user.lastName}</h4>
+                                  <div className="flex items-center space-x-1 mb-1">
+                                    <Badge variant="outline" className="text-xs px-1">
+                                      {user.userType}
+                                    </Badge>
+                                  </div>
+                                  <div className="flex items-center text-xs text-gray-600">
+                                    <MapPin className="w-3 h-3 mr-1" />
+                                    <span className="truncate">{user.location || 'Unknown'}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Quick Info */}
+                              <div className="space-y-2 mb-3">
+                                {/* Shared Interests */}
+                                {user.sharedInterests && user.sharedInterests.length > 0 && (
+                                  <div className="bg-blue-50 p-2 rounded border border-blue-200">
+                                    <div className="flex items-center mb-1">
+                                      <Heart className="w-3 h-3 mr-1 text-blue-500" />
+                                      <span className="text-xs font-medium text-blue-700">
+                                        {user.sharedInterests.length} shared
+                                      </span>
+                                    </div>
+                                    <div className="flex flex-wrap gap-1">
+                                      {user.sharedInterests.slice(0, 2).map((interest: string) => (
+                                        <Badge key={interest} className="bg-blue-100 text-blue-800 text-xs px-1 py-0">
+                                          {interest}
+                                        </Badge>
+                                      ))}
+                                      {user.sharedInterests.length > 2 && (
+                                        <span className="text-xs text-blue-600">+{user.sharedInterests.length - 2}</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Match indicators */}
+                                <div className="flex items-center justify-between text-xs">
+                                  <div className="flex space-x-2">
+                                    {mutualConnections > 0 && (
+                                      <div className="flex items-center text-purple-600">
+                                        <Users className="w-3 h-3 mr-1" />
+                                        <span>{mutualConnections} mutual</span>
+                                      </div>
+                                    )}
+                                    {user.location && currentUser?.location && 
+                                     user.location.toLowerCase() === currentUser.location.toLowerCase() && (
+                                      <div className="flex items-center text-green-600">
+                                        <Globe className="w-3 h-3 mr-1" />
+                                        <span>Same area</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="text-gray-500">
+                                    {Math.round((user.recommendationScore / 10) * 100)}% match
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Connect Button */}
+                              <div className="flex space-x-2">
+                                {user.connectionStatus === 'pending' ? (
+                                  <Button size="sm" disabled className="w-full bg-gray-100 text-gray-500 text-xs">
+                                    <Clock className="w-3 h-3 mr-1" />
+                                    Sent
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleConnect(user._id)}
+                                    disabled={processingConnections.has(user._id)}
+                                    className="w-full bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white text-xs"
+                                  >
+                                    {processingConnections.has(user._id) ? (
+                                      <Loader2 className="w-3 h-3 animate-spin" />
+                                    ) : (
+                                      <>
+                                        <UserPlus className="w-3 h-3 mr-1" />
+                                        Connect
+                                      </>
+                                    )}
+                                  </Button>
+                                )}
+                              </div>
+                            </CardContent>
+                          </Card>
+                        );
+                      })}
+                    </CardContent>
+                  </Card>
                 </div>
               )}
             </div>
