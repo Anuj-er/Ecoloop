@@ -13,7 +13,7 @@ import { Profile } from "./components/Profile";
 import { NotificationToast } from "./components/NotificationToast";
 import { FraudDetectionDashboard } from "./components/FraudDetectionDashboard";
 import { Marketplace } from "./components/Marketplace";
-import { MarketplaceAdminDashboard } from "./components/MarketplaceAdminDashboard";
+// import { MarketplaceAdminDashboard } from "./components/MarketplaceAdminDashboard";
 
 const queryClient = new QueryClient();
 
@@ -33,7 +33,7 @@ const App = () => (
             <Route path="/marketplace" element={<Marketplace />} />
             {/* Debug routes removed */}
             <Route path="/admin/fraud-detection" element={<FraudDetectionDashboard />} />
-            <Route path="/admin/marketplace" element={<MarketplaceAdminDashboard />} />
+            {/* <Route path="/admin/marketplace" element={<MarketplaceAdminDashboard />} /> */}
             <Route path="/" element={<Index />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />

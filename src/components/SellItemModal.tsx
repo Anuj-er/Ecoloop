@@ -185,12 +185,44 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
             const aiResult = aiResponse.data;
             console.log('Real-time AI analysis:', aiResult);
             
-            // Handle the simplified response format from our AI service
-            const status = aiResult.status; // 'approved', 'review', 'rejected'
+            // Handle the enhanced response format from our AI service
+            const status = aiResult.status; // 'approved', 'review', 'rejected', 'error'
             const message = aiResult.message || 'Analysis complete';
             const confidence = aiResult.confidence || 0;
             const category = aiResult.category || 'unknown';
             const detectedItem = aiResult.detected_item || 'unknown';
+            const reviewReason = aiResult.review_reason || '';
+            const matchedKeyword = aiResult.matched_keyword || '';
+            const rejectionCategory = aiResult.rejection_category || '';
+            const detailedReason = aiResult.detailed_reason || '';
+            
+            // Determine display status based on AI analysis
+            let displayStatus, displayMessage, toastMessage;
+            
+            if (status === 'approved') {
+              displayStatus = 'approved';
+              displayMessage = message;
+              toastMessage = message;
+            } else if (status === 'rejected') {
+              displayStatus = 'rejected';
+              // Enhanced rejection messages with category info
+              if (rejectionCategory) {
+                displayMessage = `REJECTED: ${detailedReason}`;
+                toastMessage = `${message} (${rejectionCategory.replace('_', ' ')})`;
+              } else {
+                displayMessage = message;
+                toastMessage = message;
+              }
+            } else if (status === 'review') {
+              displayStatus = 'warning';
+              displayMessage = `Admin Review Required: ${reviewReason || 'Material needs verification'}`;
+              toastMessage = message;
+            } else {
+              // Error case
+              displayStatus = 'warning';
+              displayMessage = 'Analysis failed - will be reviewed manually';
+              toastMessage = message;
+            }
             
             // Update image with AI analysis results
             setImages(prev => prev.map((img, i) => 
@@ -200,45 +232,50 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
                 aiAnalysis: {
                   label: detectedItem,
                   confidence: confidence,
-                  status: status,
-                  recommendations: [message],
-                  specific_issue: aiResult.reason || '',
+                  status: displayStatus,
+                  originalStatus: status, // Keep original for backend
+                  category: category,
+                  matchedKeyword: matchedKeyword,
+                  rejectionCategory: rejectionCategory,
+                  detailedReason: detailedReason,
+                  recommendations: [displayMessage],
+                  specific_issue: aiResult.reason || reviewReason,
                   quality_analysis: {
                     quality_score: confidence,
-                    issues: status === 'rejected' ? [aiResult.reason || 'Quality issue'] : []
+                    issues: status === 'rejected' ? [aiResult.reason || detailedReason || 'Content not allowed'] : []
                   }
                 }
               } : img
             ));              
             
             // Show user-friendly feedback based on status
-            if (status === 'approved') {
-              toast.success(`✅ ${message}`, { 
+            if (displayStatus === 'approved') {
+              toast.success(toastMessage, { 
                 duration: 4000
               });
-            } else if (status === 'review') {
-              toast.warning(`⚠️ ${message}`, { 
+            } else if (displayStatus === 'warning') {
+              toast.warning(toastMessage, { 
                 duration: 6000,
                 action: {
-                  label: "Details",
-                  onClick: () => console.log('Review details:', aiResult)
+                  label: "Got it",
+                  onClick: () => console.log('User acknowledged warning')
                 }
               });
-            } else if (status === 'rejected') {
-              toast.error(`❌ ${message}`, { 
-                duration: 8000,
+            } else {
+              toast.error(toastMessage, { 
+                duration: 10000,  // Longer duration for rejections
                 action: {
-                  label: "Remove",
+                  label: "Remove Image",
                   onClick: () => removeImage(index)
                 }
               });
             }
             
-            // Store recommendations for UI display
+            // Store detailed information for UI display
             setImages(prev => prev.map((img, i) => 
               i === index ? {
                 ...img,
-                allRecommendations: [message]
+                allRecommendations: [toastMessage, displayMessage].filter(Boolean)
               } : img
             ));
           } else {
@@ -321,17 +358,11 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
   };
 
   const isFormValid = () => {
-    // Check if we have rejected images that should be blocked outright
-    const hasRejectedImages = images.some(img => 
-      img.aiAnalysis?.status === 'rejected' ||
-      img.aiAnalysis?.status === 'inappropriate_content' || 
-      img.aiAnalysis?.specific_issue === 'document'
-    );
+    // Block submission only if there are truly rejected images
+    const hasRejectedImages = images.some(img => img.aiAnalysis?.status === 'rejected');
     
     if (hasRejectedImages) {
-      // Images that are rejected cannot be submitted
-      console.log('Form validation failed: Found rejected images (documents/inappropriate content/other issues)');
-      return false;
+      return false; // Cannot submit with rejected images
     }
     
     return (
@@ -358,36 +389,33 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Double check for rejected images to ensure they can't be submitted
-    const rejectedImages = images.filter(img => 
-      img.aiAnalysis?.status === 'rejected' ||
-      img.aiAnalysis?.status === 'inappropriate_content' || 
-      img.aiAnalysis?.specific_issue === 'document'
-    );
+    // Check for rejected images first
+    const rejectedImages = images.filter(img => img.aiAnalysis?.status === 'rejected');
     
     if (rejectedImages.length > 0) {
-      // Get the specific reasons for rejection from the recommendations
-      const rejectionReasons = rejectedImages
-        .map(img => {
-          if (img.aiAnalysis?.recommendations && img.aiAnalysis.recommendations.length > 0) {
-            return img.aiAnalysis.recommendations[0];
-          }
-          return img.aiAnalysis?.status === 'inappropriate_content' ? 
-            'Contains inappropriate content' : 
-            img.aiAnalysis?.specific_issue === 'document' ?
-            'Contains document or certificate images' :
-            'Image rejected by AI analysis';
-        })
-        .join(', ');
-        
-      toast.error(`Cannot submit with rejected images. ${rejectionReasons} Please remove these images.`);
-      scrollToWarnings();
+      toast.error('Cannot submit with rejected images. Please remove them and upload appropriate recyclable material images.');
       return;
     }
 
     if (!isFormValid()) {
-      toast.error('Please fill all required fields and fix image issues');
+      toast.error('Please fill all required fields');
       return;
+    }
+
+    // Check for warning images and show confirmation popup
+    const warningImages = images.filter(img => img.aiAnalysis?.status === 'warning');
+    
+    if (warningImages.length > 0) {
+      const confirmed = window.confirm(
+        `⚠️ ADMIN REVIEW REQUIRED\n\n` +
+        `${warningImages.length} image(s) detected potential issues and will need admin approval before your item goes live.\n\n` +
+        `Your item will be submitted but won't appear in the marketplace until an admin reviews and approves it.\n\n` +
+        `Do you want to continue?`
+      );
+      
+      if (!confirmed) {
+        return; // User cancelled
+      }
     }
 
     setIsSubmitting(true);
@@ -395,20 +423,24 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
     try {
       const submitData = {
         ...formData,
+        needsReview: warningImages.length > 0, // Flag for admin review
         images: images.map(img => ({
           url: img.uploaded!.url,
           public_id: img.uploaded!.public_id,
-          aiAnalysis: img.aiAnalysis
+          aiAnalysis: {
+            ...img.aiAnalysis,
+            status: img.aiAnalysis?.originalStatus || img.aiAnalysis?.status // Use original status for backend
+          }
         }))
       };
 
       const response = await api.post('/marketplace', submitData);
 
       if (response.data.success) {
-        if (response.data.needsReview) {
-          toast.success('Item submitted for review due to AI analysis results');
+        if (warningImages.length > 0) {
+          toast.success('Item submitted for admin review. You\'ll be notified once approved!');
         } else {
-          toast.success('Item listed successfully!');
+          toast.success('Item listed successfully and is now live!');
         }
         
         onSuccess();
@@ -1047,37 +1079,47 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
                     {image.aiAnalysis && (
                       <div className="absolute top-2 left-2">
                         {image.aiAnalysis.status === 'approved' ? (
-                          <Badge className="bg-green-500 text-white text-sm font-bold border-2 border-green-600 shadow-lg">
+                          <Badge 
+                            className="bg-green-500 text-white text-sm font-bold border-2 border-green-600 shadow-lg cursor-help"
+                            title={`✅ ${image.aiAnalysis.recommendations?.[0] || 'Approved for marketplace'}\n\nDetected: ${image.aiAnalysis.label} (${image.aiAnalysis.confidence?.toFixed(1)}% confidence)\nCategory: ${image.aiAnalysis.category || 'unknown'}`}
+                          >
                             <CheckCircle className="w-4 h-4 mr-1" />
                             APPROVED
                           </Badge>
-                        ) : image.aiAnalysis.status === 'review' ? (
-                          <Badge className="bg-yellow-500 text-white text-sm font-bold border-2 border-yellow-600 shadow-lg">
-                            <AlertTriangle className="w-4 h-4 mr-1" />
-                            UNDER REVIEW
-                          </Badge>
-                        ) : image.aiAnalysis.status === 'rejected' ? (
-                          <Badge className="bg-red-500 text-white text-sm font-bold border-2 border-red-600 shadow-lg">
-                            <X className="w-4 h-4 mr-1" />
-                            REJECTED
-                          </Badge>
-                        ) : image.aiAnalysis.status === 'usable' ? (
-                          <Badge className="bg-green-500 text-white text-sm font-bold border-2 border-green-600 shadow-lg">
-                            <CheckCircle className="w-4 h-4 mr-1" />
-                            APPROVED
+                        ) : image.aiAnalysis.status === 'warning' ? (
+                          <Badge 
+                            className="bg-yellow-500 text-white text-sm font-bold border-2 border-yellow-600 shadow-lg cursor-help"
+                            title={`⚠️ ${image.aiAnalysis.recommendations?.[0] || 'Needs admin review'}\n\nDetected: ${image.aiAnalysis.label} (${image.aiAnalysis.confidence?.toFixed(1)}% confidence)\nCategory: ${image.aiAnalysis.category || 'unknown'}\nReason: ${image.aiAnalysis.specific_issue || 'Manual verification required'}`}
+                          >
+                            <AlertTriangle className="w-4 h-4" />
                           </Badge>
                         ) : (
-                          <Badge className="bg-yellow-500 text-white text-sm font-bold border-2 border-yellow-600 shadow-lg">
-                            <AlertTriangle className="w-4 h-4 mr-1" />
-                            UNDER REVIEW
+                          <Badge 
+                            className="bg-red-500 text-white text-sm font-bold border-2 border-red-600 shadow-lg cursor-help"
+                            title={`❌ ${image.aiAnalysis.recommendations?.[0] || 'Rejected - not suitable for marketplace'}\n\nDetected: ${image.aiAnalysis.label}\nReason: ${image.aiAnalysis.specific_issue || 'Unsuitable content'}`}
+                          >
+                            <X className="w-4 h-4 mr-1" />
+                            REJECTED
                           </Badge>
                         )}
                       </div>
                     )}
                     
-                    {/* Add a warning border around problematic images */}
-                    {image.aiAnalysis && image.aiAnalysis.status !== 'usable' && (
-                      <div className="absolute inset-0 border-2 border-red-500 rounded-lg animate-pulse"></div>
+                    {/* Category and confidence display for approved items */}
+                    {image.aiAnalysis && image.aiAnalysis.status === 'approved' && image.aiAnalysis.category && (
+                      <div className="absolute bottom-2 left-2">
+                        <Badge className="bg-blue-500 text-white text-xs">
+                          {image.aiAnalysis.category}
+                        </Badge>
+                      </div>
+                    )}
+                    
+                    {/* Add warning border for problematic images */}
+                    {image.aiAnalysis && image.aiAnalysis.status === 'rejected' && (
+                      <div className="absolute inset-0 border-3 border-red-500 rounded-lg animate-pulse shadow-lg"></div>
+                    )}
+                    {image.aiAnalysis && image.aiAnalysis.status === 'warning' && (
+                      <div className="absolute inset-0 border-3 border-yellow-500 rounded-lg animate-pulse shadow-lg"></div>
                     )}
                     
                     {/* Remove Button */}
@@ -1167,11 +1209,17 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
                 )}
               </Button>
               
-              {/* Tooltip explaining why button is disabled if document images are present */}
-              {images.some(img => img.aiAnalysis?.status === 'inappropriate_content' || img.aiAnalysis?.specific_issue === 'document') && (
+              {/* Tooltip explaining submission status */}
+              {images.some(img => img.aiAnalysis?.status === 'rejected') && (
                 <div className="absolute bottom-full mb-2 right-0 w-64 p-2 bg-red-50 border border-red-200 rounded-md shadow-lg text-xs invisible group-hover:visible transition-all z-20">
-                  <p className="font-semibold text-red-600">Cannot submit with document images</p>
-                  <p className="mt-1">Please remove any images that were flagged as documents, certificates, or ID cards to proceed.</p>
+                  <p className="font-semibold text-red-600">Cannot submit with rejected images</p>
+                  <p className="mt-1">Please remove rejected images and upload appropriate recyclable material photos.</p>
+                </div>
+              )}
+              {images.some(img => img.aiAnalysis?.status === 'warning') && !images.some(img => img.aiAnalysis?.status === 'rejected') && (
+                <div className="absolute bottom-full mb-2 right-0 w-64 p-2 bg-yellow-50 border border-yellow-200 rounded-md shadow-lg text-xs invisible group-hover:visible transition-all z-20">
+                  <p className="font-semibold text-yellow-600">Admin review required</p>
+                  <p className="mt-1">Some images need verification. Your item will be reviewed before going live.</p>
                 </div>
               )}
             </div>

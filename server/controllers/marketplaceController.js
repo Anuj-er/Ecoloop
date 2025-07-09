@@ -14,7 +14,7 @@ const analyzeImageWithAI = async (imageUrl) => {
   try {
     console.log(`Sending image to AI service: ${imageUrl}`);
     
-    const response = await axios.post(`${AI_SERVICE_URL}/predict`, {
+    const response = await axios.post(`${AI_SERVICE_URL}/analyze-marketplace`, {
       image_url: imageUrl
     }, {
       timeout: 30000, // 30 second timeout
@@ -83,13 +83,13 @@ export const createMarketplaceItem = asyncHandler(async (req, res) => {
   for (const image of images) {
     const aiAnalysis = await analyzeImageWithAI(image.url);
     console.log('AI Analysis for image:', image.url, aiAnalysis);      // Check if image needs to be rejected or flagged
-    if (aiAnalysis.status !== 'usable') {
+    if (aiAnalysis.status !== 'approved') {
       // For rejected images (status is 'rejected'), block the post immediately
       if (aiAnalysis.status === 'rejected') {
         hasLowQualityImage = true;
       }
-      // For pending_review images, we'll flag them but allow submission
-      else if (aiAnalysis.status === 'pending_review') {
+      // For review images, we'll flag them but allow submission
+      else if (aiAnalysis.status === 'review') {
         // Will be handled later in the code as suspicious images
       }
       
@@ -215,16 +215,20 @@ export const createMarketplaceItem = asyncHandler(async (req, res) => {
       });
     }
 
-    // Store all relevant AI analysis information
+    // Store all relevant AI analysis information with new response format
     analyzedImages.push({
       ...image,
       aiAnalysis: {
-        label: aiAnalysis.label,
-        confidence: aiAnalysis.confidence,
-        status: aiAnalysis.status,
-        qualityScore: aiAnalysis.quality_analysis ? aiAnalysis.quality_analysis.quality_score : (aiAnalysis.qualityScore || 75),
-        specific_issue: aiAnalysis.specific_issue || '',
-        recommendations: aiAnalysis.recommendations || []
+        label: aiAnalysis.detected_item || aiAnalysis.label || 'unknown',
+        confidence: aiAnalysis.confidence || 0,
+        status: aiAnalysis.status || 'unknown',
+        category: aiAnalysis.category || 'unknown',
+        qualityScore: aiAnalysis.confidence || 75, // Use confidence as quality score
+        specific_issue: aiAnalysis.reason || aiAnalysis.review_reason || '',
+        recommendations: aiAnalysis.message ? [aiAnalysis.message] : [],
+        review_reason: aiAnalysis.review_reason || '',
+        rejection_category: aiAnalysis.rejection_category || '',
+        detailed_reason: aiAnalysis.detailed_reason || ''
       }
     });
   }
@@ -257,14 +261,37 @@ export const createMarketplaceItem = asyncHandler(async (req, res) => {
     });
   }
 
-  // Check if any image needs review (pending_review)
+  // Check if any image needs review
   const suspiciousImages = analyzedImages.filter(img => 
-    img.aiAnalysis.status === 'pending_review' || 
+    img.aiAnalysis.status === 'review' || 
     img.aiAnalysis.status === 'suspicious' || 
     img.aiAnalysis.confidence < 30
   );
   
   const hasSuspiciousImage = suspiciousImages.length > 0;
+  
+  // Debug logging
+  console.log('=== AI Analysis Debug ===');
+  console.log('Total images analyzed:', analyzedImages.length);
+  console.log('Suspicious images found:', suspiciousImages.length);
+  console.log('Has suspicious image:', hasSuspiciousImage);
+  
+  analyzedImages.forEach((img, index) => {
+    console.log(`Image ${index + 1}:`, {
+      status: img.aiAnalysis.status,
+      confidence: img.aiAnalysis.confidence,
+      label: img.aiAnalysis.label,
+      category: img.aiAnalysis.category
+    });
+  });
+  
+  if (hasSuspiciousImage) {
+    console.log('Suspicious images details:', suspiciousImages.map(img => ({
+      status: img.aiAnalysis.status,
+      reason: img.aiAnalysis.review_reason
+    })));
+  }
+  console.log('========================');
   
   // Add detailed warnings for suspicious images
   if (hasSuspiciousImage) {

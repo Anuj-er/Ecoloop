@@ -63,10 +63,15 @@ const marketplaceItemSchema = new mongoose.Schema({
       confidence: Number,
       status: {
         type: String,
-        enum: ['usable', 'blurry', 'low_quality', 'suspicious'],
+        enum: ['approved', 'review', 'rejected', 'error', 'usable', 'blurry', 'low_quality', 'suspicious'],
         default: 'usable'
       },
-      qualityScore: Number
+      qualityScore: Number,
+      category: String,
+      message: String,
+      review_reason: String,
+      detected_item: String,
+      matched_keyword: String
     }
   }],
   status: {

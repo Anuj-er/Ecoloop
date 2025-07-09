@@ -97,7 +97,7 @@ export const Footer = () => {
               <span className="ml-2">Chitkara University</span>
             </p>
             <p className="text-sm">
-              Built with ❤️ for a sustainable future | © 2024 EcoLoop AI
+              Built with ❤️ for a sustainable future | © 2025 EcoLoop AI
             </p>
           </div>
         </div>
