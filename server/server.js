@@ -17,6 +17,7 @@ import uploadRoutes from './routes/upload.js';
 import adminRoutes from './routes/admin.js';
 import debugRoutes from './routes/debug.js';
 import marketplaceRoutes from './routes/marketplace.js';
+import paymentRoutes from './routes/payment.js';
 
 dotenv.config();
 
@@ -53,7 +54,8 @@ app.get('/', (req, res) => {
       connections: '/api/connections',
       notifications: '/api/notifications',
       upload: '/api/upload',
-      marketplace: '/api/marketplace'
+      marketplace: '/api/marketplace',
+      payments: '/api/payments'
     },
     status: 'Server is running!'
   });
@@ -78,6 +80,7 @@ app.use('/api/connections', connectionRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/marketplace', marketplaceRoutes);
+app.use('/api/payments', paymentRoutes);
 
 // Not found and error handlers
 app.use(notFound);

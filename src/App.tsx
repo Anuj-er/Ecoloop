@@ -13,6 +13,9 @@ import { Profile } from "./components/Profile";
 import { NotificationToast } from "./components/NotificationToast";
 import { FraudDetectionDashboard } from "./components/FraudDetectionDashboard";
 import { Marketplace } from "./components/Marketplace";
+import { Purchases } from "./components/Purchases";
+import { ProductPage } from "./components/ProductPage";
+import { Cart } from "./components/Cart";
 // import { MarketplaceAdminDashboard } from "./components/MarketplaceAdminDashboard";
 
 const queryClient = new QueryClient();
@@ -31,6 +34,9 @@ const App = () => (
             <Route path="/register" element={<Register />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/marketplace" element={<Marketplace />} />
+            <Route path="/product/:id" element={<ProductPage />} />
+            <Route path="/cart" element={<Cart />} />
+            <Route path="/purchases" element={<Purchases />} />
             {/* Debug routes removed */}
             <Route path="/admin/fraud-detection" element={<FraudDetectionDashboard />} />
             {/* <Route path="/admin/marketplace" element={<MarketplaceAdminDashboard />} /> */}

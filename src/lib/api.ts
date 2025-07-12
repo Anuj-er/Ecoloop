@@ -138,4 +138,50 @@ export const adminAPI = {
   getFraudStats: () => api.get('/admin/fraud-stats'),
 };
 
-export default api; 
+// Payment API
+export const paymentAPI = {
+  // Create Stripe payment intent
+  createPaymentIntent: (data: { 
+    itemId: string; 
+    quantity: number; 
+    shippingInfo?: {
+      fullName: string;
+      addressLine1: string;
+      addressLine2?: string;
+      city: string;
+      state: string;
+      postalCode: string;
+      country: string;
+      phone: string;
+      email: string;
+    }
+  }) => api.post('/payments/create-payment-intent', data),
+  
+  // Verify Stripe payment
+  verifyPayment: (data: {
+    paymentIntentId: string;
+    paymentId: string;
+  }) => api.post('/payments/verify', data),
+  
+  // Process crypto payment
+  processCryptoPayment: (data: {
+    itemId: string;
+    quantity: number;
+    transactionHash: string;
+    walletAddress: string;
+  }) => api.post('/payments/crypto', data),
+  
+  // Confirm delivery
+  confirmDelivery: (data: { paymentId: string }) =>
+    api.post('/payments/confirm-delivery', data),
+  
+  // Get payment history
+  getPaymentHistory: (type?: 'purchases' | 'sales') =>
+    api.get(`/payments/history${type ? `?type=${type}` : ''}`),
+  
+  // Get payment details
+  getPaymentDetails: (paymentId: string) =>
+    api.get(`/payments/${paymentId}`)
+};
+
+export default api;

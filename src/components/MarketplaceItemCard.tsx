@@ -1,17 +1,20 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { MapPin, Eye, Clock, User, Building } from "lucide-react";
+import { MapPin, Eye, Clock, User, Building, ShoppingCart, ArrowRight } from "lucide-react";
 import { MarketplaceItem } from "@/types/marketplace";
+import { isAmountAboveMinimum, getMinimumAmount } from "@/utils/paymentUtils";
+import { useNavigate } from "react-router-dom";
 
 // Using shared interface
 
 interface Props {
   item: MarketplaceItem;
-  onClick: () => void;
 }
 
-export const MarketplaceItemCard = ({ item, onClick }: Props) => {
+export const MarketplaceItemCard = ({ item }: Props) => {
+  const navigate = useNavigate();
   const formatPrice = (price: number, currency: string) => {
     if (currency === 'INR') {
       return `₹${price.toLocaleString('en-IN')}`;
@@ -48,7 +51,7 @@ export const MarketplaceItemCard = ({ item, onClick }: Props) => {
   return (
     <Card 
       className="cursor-pointer hover:shadow-lg transition-shadow duration-200 overflow-hidden"
-      onClick={onClick}
+      onClick={() => navigate(`/product/${item._id}`)}
     >
       {/* Image */}
       <div className="relative w-full h-48 bg-gray-200">
@@ -158,7 +161,7 @@ export const MarketplaceItemCard = ({ item, onClick }: Props) => {
         )}
 
         {/* Time and Interest */}
-        <div className="flex justify-between items-center text-xs text-gray-400">
+        <div className="flex justify-between items-center text-xs text-gray-400 mb-3">
           <div className="flex items-center gap-1">
             <Clock className="w-3 h-3" />
             <span>{formatTimeAgo(item.createdAt)}</span>
@@ -167,6 +170,26 @@ export const MarketplaceItemCard = ({ item, onClick }: Props) => {
             <span>{item.interestedBuyers.length} interested</span>
           )}
         </div>
+
+        {/* View Product Button */}
+        <>
+          {!isAmountAboveMinimum(item.price, item.currency) && (
+            <div className="text-xs text-amber-600 bg-amber-50 p-2 rounded border border-amber-200 mb-2">
+              ⚠️ Price below minimum payment amount ({getMinimumAmount(item.currency).symbol}{getMinimumAmount(item.currency).amount}). Contact seller for offline purchase.
+            </div>
+          )}
+          <Button
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate(`/product/${item._id}`);
+            }}
+            className="w-full"
+            size="sm"
+          >
+            <ArrowRight className="w-4 h-4 mr-2" />
+            View Product
+          </Button>
+        </>
       </CardContent>
     </Card>
   );

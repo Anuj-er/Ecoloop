@@ -411,7 +411,9 @@ export const getMarketplaceItems = asyncHandler(async (req, res) => {
   // Build filter object
   const filter = { 
     status: 'active',
-    reviewStatus: 'approved'
+    reviewStatus: 'approved',
+    // Exclude items listed by the current user
+    seller: { $ne: req.user._id }
   };
 
   if (materialType) {

@@ -11,6 +11,7 @@ import { Upload, X, AlertTriangle, CheckCircle, Camera, Loader2 } from "lucide-r
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import api from "@/lib/api";
 import { toast } from "sonner";
+import { getMinimumAmount, isAmountAboveMinimum } from "@/utils/paymentUtils";
 
 // Define interface for warning details
 interface WarningDetail {
@@ -45,6 +46,8 @@ interface ImageUpload {
     label: string;
     confidence: number;
     status: string;
+    originalStatus?: string;
+    category?: string;
     recommendations: string[];
     specific_issue?: string;
     document_detection_method?: string;
@@ -674,9 +677,15 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
                 type="number"
                 value={formData.price}
                 onChange={(e) => handleInputChange('price', parseFloat(e.target.value) || 0)}
-                placeholder="Enter price"
-                min="0"
+                placeholder={`Enter price (minimum ${getMinimumAmount('INR').symbol}${getMinimumAmount('INR').amount})`}
+                min={getMinimumAmount('INR').amount}
+                step="0.01"
               />
+              {formData.price > 0 && !isAmountAboveMinimum(formData.price, 'INR') && (
+                <p className="text-sm text-amber-600 bg-amber-50 p-2 rounded border border-amber-200">
+                  ⚠️ Price is below minimum payment amount ({getMinimumAmount('INR').symbol}{getMinimumAmount('INR').amount}). Buyers will not be able to purchase this item online.
+                </p>
+              )}
             </div>
           </div>
 

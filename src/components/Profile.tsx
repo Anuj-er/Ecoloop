@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Textarea } from "@/components/ui/textarea";
-import { MapPin, Phone, Mail, Calendar, Star, Package, Users, Handshake, Edit, Settings } from "lucide-react";
+import { MapPin, Phone, Mail, Calendar, Star, Package, Users, Handshake, Edit, Settings, ShoppingCart } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProfileCompletionModal } from "./ProfileCompletionModal";
 import { CreatePostModal } from "./CreatePostModal";
@@ -314,17 +314,35 @@ export const Profile = () => {
                   </div>
                 </div>
               </div>
-              <div className="flex space-x-2">
-                <Button 
-                  variant="outline" 
-                  onClick={() => setShowEditModal(true)}
-                >
-                  <Edit className="w-4 h-4 mr-2" />
-                  Edit Profile
-                </Button>
-                <Button variant="outline">
-                  <Settings className="w-4 h-4" />
-                </Button>
+              <div className="flex flex-col space-y-2">
+                <div className="flex space-x-2">
+                  <Button 
+                    variant="outline" 
+                    onClick={() => setShowEditModal(true)}
+                  >
+                    <Edit className="w-4 h-4 mr-2" />
+                    Edit Profile
+                  </Button>
+                  <Button variant="outline">
+                    <Settings className="w-4 h-4" />
+                  </Button>
+                </div>
+                <div className="flex space-x-2">
+                  <Button 
+                    variant="default"
+                    onClick={() => window.location.href = '/purchases'}
+                  >
+                    <Package className="w-4 h-4 mr-2" />
+                    My Purchases
+                  </Button>
+                  <Button 
+                    variant="outline"
+                    onClick={() => window.location.href = '/marketplace'}
+                  >
+                    <ShoppingCart className="w-4 h-4 mr-2" />
+                    Marketplace
+                  </Button>
+                </div>
               </div>
             </div>
 
