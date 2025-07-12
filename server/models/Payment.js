@@ -1,10 +1,37 @@
 import mongoose from 'mongoose';
 
 const paymentSchema = new mongoose.Schema({
+  // Flag to indicate if this is a multi-item payment
+  multiItem: {
+    type: Boolean,
+    default: false
+  },
+  // For multi-item payments, store item details in an array
+  items: [{
+    itemId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'MarketplaceItem'
+    },
+    sellerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    quantity: {
+      type: Number,
+      min: 1
+    },
+    price: {
+      type: Number,
+      min: 0
+    },
+    title: String
+  }],
+  // Original fields for single-item payments
   itemId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'MarketplaceItem',
-    required: true
+    // Not required if multiItem is true
+    required: function() { return !this.multiItem; }
   },
   buyerId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -14,7 +41,8 @@ const paymentSchema = new mongoose.Schema({
   sellerId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true
+    // Not required if multiItem is true
+    required: function() { return !this.multiItem; }
   },
   amount: {
     type: Number,
@@ -62,7 +90,8 @@ const paymentSchema = new mongoose.Schema({
   },
   quantity: {
     type: Number,
-    required: true,
+    // Not required if multiItem is true
+    required: function() { return !this.multiItem; },
     min: 1
   },
   shippingInfo: {
@@ -108,6 +137,7 @@ paymentSchema.index({ itemId: 1 });
 paymentSchema.index({ status: 1 });
 paymentSchema.index({ transactionId: 1 });
 paymentSchema.index({ transactionHash: 1 });
+paymentSchema.index({ 'items.itemId': 1 });
 
 const Payment = mongoose.model('Payment', paymentSchema);
 

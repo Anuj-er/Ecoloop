@@ -142,8 +142,12 @@ export const adminAPI = {
 export const paymentAPI = {
   // Create Stripe payment intent
   createPaymentIntent: (data: { 
-    itemId: string; 
-    quantity: number; 
+    itemId?: string; 
+    quantity?: number;
+    items?: Array<{
+      itemId: string;
+      quantity: number;
+    }>;
     shippingInfo?: {
       fullName: string;
       addressLine1: string;

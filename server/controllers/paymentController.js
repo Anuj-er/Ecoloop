@@ -14,39 +14,138 @@ const web3 = new Web3(process.env.ETHEREUM_RPC_URL || 'https://mainnet.infura.io
 // Create Stripe payment intent for fiat payments
 export const createPaymentIntent = async (req, res) => {
   try {
-    const { itemId, quantity, shippingInfo } = req.body;
+    const { itemId, quantity, items, shippingInfo } = req.body;
     const buyerId = req.user._id;
 
-    // Validate item
-    const item = await MarketplaceItem.findById(itemId).populate('seller');
-    if (!item) {
-      return res.status(404).json({
-        success: false,
-        message: 'Item not found'
-      });
-    }
+    let totalAmount = 0;
+    let currency = 'INR';
+    let metadata = {};
+    let itemDetails = [];
 
-    // Check if buyer is not the seller
-    if (item.seller._id.toString() === buyerId.toString()) {
+    // Handle multi-item checkout
+    if (items && Array.isArray(items) && items.length > 0) {
+      // Fetch all items at once for efficiency
+      const itemIds = items.map(item => item.itemId);
+      const fetchedItems = await MarketplaceItem.find({ _id: { $in: itemIds } }).populate('seller');
+      
+      // Create a map for easy lookup
+      const itemsMap = {};
+      fetchedItems.forEach(item => {
+        itemsMap[item._id.toString()] = item;
+      });
+
+      // Calculate total and validate each item
+      for (const cartItem of items) {
+        const item = itemsMap[cartItem.itemId];
+        
+        if (!item) {
+          return res.status(404).json({
+            success: false,
+            message: `Item not found: ${cartItem.itemId}`
+          });
+        }
+
+        // Check if buyer is not the seller
+        if (item.seller._id.toString() === buyerId.toString()) {
+          return res.status(400).json({
+            success: false,
+            message: `You cannot buy your own item: ${item.title}`
+          });
+        }
+
+        // Check quantity availability
+        if (cartItem.quantity > item.quantity) {
+          return res.status(400).json({
+            success: false,
+            message: `Insufficient quantity available for ${item.title}`
+          });
+        }
+
+        const itemAmount = item.price * cartItem.quantity;
+        totalAmount += itemAmount;
+        
+        // Use the first item's currency (assuming all items use same currency)
+        if (!currency) {
+          currency = item.currency?.toLowerCase() || 'inr';
+        }
+        
+        // Store item details for later
+        itemDetails.push({
+          itemId: item._id,
+          sellerId: item.seller._id,
+          quantity: cartItem.quantity,
+          price: item.price,
+          title: item.title
+        });
+      }
+      
+      // Add items to metadata
+      metadata = {
+        buyerId: buyerId.toString(),
+        multiItemCheckout: 'true',
+        itemCount: items.length.toString()
+      };
+      
+      // Add first 10 items to metadata (Stripe metadata has size limits)
+      itemDetails.slice(0, 10).forEach((item, index) => {
+        metadata[`item_${index}_id`] = item.itemId.toString();
+        metadata[`item_${index}_qty`] = item.quantity.toString();
+      });
+      
+    } else if (itemId) {
+      // Single item checkout (existing logic)
+      // Validate item
+      const item = await MarketplaceItem.findById(itemId).populate('seller');
+      if (!item) {
+        return res.status(404).json({
+          success: false,
+          message: 'Item not found'
+        });
+      }
+
+      // Check if buyer is not the seller
+      if (item.seller._id.toString() === buyerId.toString()) {
+        return res.status(400).json({
+          success: false,
+          message: 'You cannot buy your own item'
+        });
+      }
+
+      // Check quantity availability
+      if (quantity > item.quantity) {
+        return res.status(400).json({
+          success: false,
+          message: 'Insufficient quantity available'
+        });
+      }
+
+      totalAmount = item.price * quantity;
+      currency = item.currency?.toLowerCase() || 'inr';
+      
+      metadata = {
+        itemId: itemId,
+        buyerId: buyerId.toString(),
+        sellerId: item.seller._id.toString(),
+        quantity: quantity.toString()
+      };
+      
+      itemDetails = [{
+        itemId: item._id,
+        sellerId: item.seller._id,
+        quantity,
+        price: item.price,
+        title: item.title
+      }];
+    } else {
       return res.status(400).json({
         success: false,
-        message: 'You cannot buy your own item'
+        message: 'No items provided for checkout'
       });
     }
 
-    // Check quantity availability
-    if (quantity > item.quantity) {
-      return res.status(400).json({
-        success: false,
-        message: 'Insufficient quantity available'
-      });
-    }
-
-    const amount = item.price * quantity;
-    const amountInCents = Math.round(amount * 100);
+    const amountInCents = Math.round(totalAmount * 100);
     
     // Stripe minimum amount validation
-    const currency = (item.currency?.toLowerCase() || 'inr');
     const minimumAmounts = {
       'inr': 5000, // ₹50 in paise
       'usd': 50,   // $0.50 in cents
@@ -67,10 +166,10 @@ export const createPaymentIntent = async (req, res) => {
       
       return res.status(400).json({
         success: false,
-        message: `Payment amount is too low. Minimum amount is ${currencySymbol}${minimumInMainCurrency}. Current amount: ${currencySymbol}${amount}`,
+        message: `Payment amount is too low. Minimum amount is ${currencySymbol}${minimumInMainCurrency}. Current amount: ${currencySymbol}${totalAmount}`,
         error: 'AMOUNT_TOO_LOW',
         minimumAmount: minimumInMainCurrency,
-        currentAmount: amount,
+        currentAmount: totalAmount,
         currency: currency.toUpperCase()
       });
     }
@@ -79,12 +178,7 @@ export const createPaymentIntent = async (req, res) => {
     const paymentIntentData = {
       amount: amountInCents,
       currency: currency,
-      metadata: {
-        itemId: itemId,
-        buyerId: buyerId.toString(),
-        sellerId: item.seller._id.toString(),
-        quantity: quantity.toString()
-      },
+      metadata,
       automatic_payment_methods: {
         enabled: true,
       }
@@ -109,26 +203,58 @@ export const createPaymentIntent = async (req, res) => {
     const paymentIntent = await stripe.paymentIntents.create(paymentIntentData);
 
     // Create payment record
-    const payment = new Payment({
-      itemId,
-      buyerId,
-      sellerId: item.seller._id,
-      amount,
-      currency: item.currency || 'INR',
-      paymentMethod: {
-        type: 'fiat',
-        currency: item.currency || 'INR'
-      },
-      quantity,
-      stripePaymentIntentId: paymentIntent.id,
-      status: 'pending',
-      metadata: {
-        userAgent: req.headers['user-agent'],
-        ipAddress: req.ip,
-        timestamp: new Date()
-      },
-      shippingInfo: shippingInfo || null
-    });
+    let payment;
+    
+    if (items && items.length > 0) {
+      // Create multi-item payment
+      payment = new Payment({
+        multiItem: true,
+        items: itemDetails.map(item => ({
+          itemId: item.itemId,
+          sellerId: item.sellerId,
+          quantity: item.quantity,
+          price: item.price,
+          title: item.title
+        })),
+        buyerId,
+        amount: totalAmount,
+        currency: currency.toUpperCase(),
+        paymentMethod: {
+          type: 'fiat',
+          currency: currency.toUpperCase()
+        },
+        stripePaymentIntentId: paymentIntent.id,
+        status: 'pending',
+        metadata: {
+          userAgent: req.headers['user-agent'],
+          ipAddress: req.ip,
+          timestamp: new Date()
+        },
+        shippingInfo: shippingInfo || null
+      });
+    } else {
+      // Create single item payment (existing logic)
+      payment = new Payment({
+        itemId: itemDetails[0].itemId,
+        buyerId,
+        sellerId: itemDetails[0].sellerId,
+        amount: totalAmount,
+        currency: currency.toUpperCase(),
+        paymentMethod: {
+          type: 'fiat',
+          currency: currency.toUpperCase()
+        },
+        quantity: itemDetails[0].quantity,
+        stripePaymentIntentId: paymentIntent.id,
+        status: 'pending',
+        metadata: {
+          userAgent: req.headers['user-agent'],
+          ipAddress: req.ip,
+          timestamp: new Date()
+        },
+        shippingInfo: shippingInfo || null
+      });
+    }
 
     await payment.save();
 
@@ -186,8 +312,23 @@ export const verifyPayment = async (req, res) => {
       console.log('Found payment record:', payment._id, 'Status:', payment.status);
 
       try {
-        // Populate references
-        await payment.populate('itemId');
+        // Populate references based on whether it's a multi-item or single-item payment
+        if (payment.multiItem && payment.items && payment.items.length > 0) {
+          // For multi-item payments, populate each item
+          for (let i = 0; i < payment.items.length; i++) {
+            if (payment.items[i].itemId) {
+              try {
+                await payment.populate(`items.${i}.itemId`);
+              } catch (populateItemError) {
+                console.error(`Error populating item ${i}:`, populateItemError);
+              }
+            }
+          }
+        } else {
+          // For single-item payments, populate as before
+          await payment.populate('itemId');
+        }
+        
         await payment.populate('buyerId');
         await payment.populate('sellerId');
       } catch (populateError) {
@@ -235,9 +376,27 @@ export const verifyPayment = async (req, res) => {
 
         console.log('Payment marked as completed:', payment._id);
 
-        // Update item quantity if possible
+        // Update item quantities
         try {
-          if (payment.itemId) {
+          if (payment.multiItem && payment.items && payment.items.length > 0) {
+            // Handle multi-item payment
+            for (const paymentItem of payment.items) {
+              if (paymentItem.itemId) {
+                const item = await MarketplaceItem.findById(paymentItem.itemId);
+                if (item) {
+                  item.quantity -= paymentItem.quantity;
+                  if (item.quantity <= 0) {
+                    item.status = 'sold';
+                  }
+                  await item.save();
+                  console.log('Item quantity updated:', item._id, 'New quantity:', item.quantity);
+                } else {
+                  console.warn('Item not found for quantity update:', paymentItem.itemId);
+                }
+              }
+            }
+          } else if (payment.itemId) {
+            // Handle single-item payment (existing logic)
             const item = await MarketplaceItem.findById(payment.itemId);
             if (item) {
               item.quantity -= payment.quantity;

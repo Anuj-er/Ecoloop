@@ -21,13 +21,17 @@ const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || 
 interface PaymentModalProps {
   isOpen: boolean;
   onClose: () => void;
-  item: MarketplaceItem;
+  item: MarketplaceItem | null;
+  items?: MarketplaceItem[];
+  quantities?: {[key: string]: number};
   onPaymentSuccess: (result: PaymentResult) => void;
 }
 
 // Stripe payment form component
 const StripePaymentForm = ({ 
   item, 
+  items,
+  quantities,
   quantity, 
   totalPrice, 
   onSuccess, 
@@ -36,7 +40,9 @@ const StripePaymentForm = ({
   setIsProcessing,
   shippingInfo
 }: {
-  item: MarketplaceItem;
+  item: MarketplaceItem | null;
+  items?: MarketplaceItem[];
+  quantities?: {[key: string]: number};
   quantity: number;
   totalPrice: number;
   onSuccess: (result: PaymentResult) => void;
@@ -48,6 +54,9 @@ const StripePaymentForm = ({
   const stripe = useStripe();
   const elements = useElements();
   const { user } = useAuth();
+  
+  // Determine if we're in multi-item checkout mode
+  const isMultiItemCheckout = !!items && items.length > 0;
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -61,13 +70,32 @@ const StripePaymentForm = ({
 
     try {
       // Create payment intent on backend
-      console.log('Creating payment intent for item:', item._id, 'quantity:', quantity);
+      let response;
       
-      const response = await paymentAPI.createPaymentIntent({
-        itemId: item._id,
-        quantity,
-        shippingInfo
-      });
+      if (isMultiItemCheckout && items) {
+        console.log('Creating multi-item payment intent for', items.length, 'items');
+        
+        // Create a payload with all items and their quantities
+        const itemsData = items.map(item => ({
+          itemId: item._id,
+          quantity: quantities?.[item._id] || 1
+        }));
+        
+        response = await paymentAPI.createPaymentIntent({
+          items: itemsData,
+          shippingInfo
+        });
+      } else if (item) {
+        console.log('Creating payment intent for item:', item._id, 'quantity:', quantity);
+        
+        response = await paymentAPI.createPaymentIntent({
+          itemId: item._id,
+          quantity,
+          shippingInfo
+        });
+      } else {
+        throw new Error('No items selected for checkout');
+      }
 
       console.log('Payment intent response:', response.data);
 
@@ -96,7 +124,6 @@ const StripePaymentForm = ({
             }
           },
         }
-        // Removing shipping information here as it's already set on the server
       });
 
       if (error) {
@@ -194,7 +221,7 @@ const StripePaymentForm = ({
   );
 };
 
-export const PaymentModal = ({ isOpen, onClose, item, onPaymentSuccess }: PaymentModalProps) => {
+export const PaymentModal = ({ isOpen, onClose, item, items, quantities, onPaymentSuccess }: PaymentModalProps) => {
   const { user } = useAuth();
   const [isProcessing, setIsProcessing] = useState(false);
   const [walletConnected, setWalletConnected] = useState(false);
@@ -216,6 +243,21 @@ export const PaymentModal = ({ isOpen, onClose, item, onPaymentSuccess }: Paymen
     email: user?.email || ''
   });
 
+  // Determine if we're in multi-item checkout mode
+  const isMultiItemCheckout = !!items && items.length > 0;
+  
+  // Calculate totals for multi-item checkout
+  const calculateTotalPrice = () => {
+    if (isMultiItemCheckout && items && quantities) {
+      return items.reduce((total, item) => {
+        const itemQuantity = quantities[item._id] || 1;
+        return total + (item.price * itemQuantity);
+      }, 0);
+    }
+    
+    return item ? item.price * quantity : 0;
+  };
+
   // Country code to name mapping
   const countryNames: Record<string, string> = {
     'IN': 'India',
@@ -230,7 +272,7 @@ export const PaymentModal = ({ isOpen, onClose, item, onPaymentSuccess }: Paymen
       checkWalletConnection();
       convertPriceToEth();
     }
-  }, [isOpen, item.price]);
+  }, [isOpen, calculateTotalPrice()]);
 
   const checkWalletConnection = async () => {
     if (paymentService.isMetaMaskAvailable()) {
@@ -250,7 +292,8 @@ export const PaymentModal = ({ isOpen, onClose, item, onPaymentSuccess }: Paymen
 
   const convertPriceToEth = async () => {
     try {
-      const ethAmount = await paymentService.convertUsdToEth(item.price * quantity);
+      const totalPrice = calculateTotalPrice();
+      const ethAmount = await paymentService.convertUsdToEth(totalPrice);
       setEthPrice(ethAmount);
     } catch (error) {
       console.error('Failed to convert price to ETH:', error);
@@ -282,7 +325,7 @@ export const PaymentModal = ({ isOpen, onClose, item, onPaymentSuccess }: Paymen
     
     if (paymentMode === 'mock') {
       toast.info('Using mock payment for testing...');
-      return await MockPaymentService.processMockPayment(item.price * quantity, item.currency);
+      return await MockPaymentService.processMockPayment(calculateTotalPrice(), item?.currency || 'INR');
     }
 
     // For Stripe, this will be handled by the StripePaymentForm component
@@ -299,8 +342,8 @@ export const PaymentModal = ({ isOpen, onClose, item, onPaymentSuccess }: Paymen
 
     try {
       const paymentDetails: PaymentDetails = {
-        itemId: item._id,
-        sellerId: item.seller._id,
+        itemId: item?._id,
+        sellerId: item?.seller._id,
         buyerId: user._id,
         amount: ethPrice,
         currency: 'ETH',
@@ -370,7 +413,7 @@ export const PaymentModal = ({ isOpen, onClose, item, onPaymentSuccess }: Paymen
     }
   };
 
-  const totalPrice = item.price * quantity;
+  const totalPrice = calculateTotalPrice();
   const totalEthPrice = ethPrice * quantity;
 
   return (
@@ -381,40 +424,79 @@ export const PaymentModal = ({ isOpen, onClose, item, onPaymentSuccess }: Paymen
           <div className="w-1/3 bg-gray-50 p-6 border-r">
             <div className="mb-6">
               <h3 className="font-semibold text-lg mb-4">Order Summary</h3>
-              <div className="flex gap-3 mb-4">
-                <img
-                  src={item.images?.[0]?.url || '/placeholder.svg'}
-                  alt={item.title}
-                  className="w-16 h-16 object-cover rounded-lg"
-                />
-                <div>
-                  <h4 className="font-medium text-sm">{item.title}</h4>
-                  <div className="flex items-center gap-1 mt-1">
-                    <Badge variant="outline" className="text-xs">{item.materialType}</Badge>
-                    <Badge variant="outline" className="text-xs">{item.condition}</Badge>
+              
+              {isMultiItemCheckout && items ? (
+                <div className="space-y-4">
+                  <p className="text-sm font-medium">{items.length} items in cart</p>
+                  <div className="max-h-[200px] overflow-y-auto space-y-3">
+                    {items.map(cartItem => (
+                      <div key={cartItem._id} className="flex gap-2 pb-2 border-b">
+                        <img
+                          src={cartItem.images?.[0]?.url || '/placeholder.svg'}
+                          alt={cartItem.title}
+                          className="w-10 h-10 object-cover rounded-sm"
+                        />
+                        <div className="flex-1">
+                          <p className="text-xs font-medium truncate">{cartItem.title}</p>
+                          <div className="flex justify-between text-xs text-gray-600">
+                            <span>x{quantities?.[cartItem._id] || 1}</span>
+                            <span>₹{cartItem.price.toLocaleString('en-IN')}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              </div>
+              ) : item ? (
+                <div className="flex gap-3 mb-4">
+                  <img
+                    src={item.images?.[0]?.url || '/placeholder.svg'}
+                    alt={item.title}
+                    className="w-16 h-16 object-cover rounded-lg"
+                  />
+                  <div>
+                    <h4 className="font-medium text-sm">{item.title}</h4>
+                    <div className="flex items-center gap-1 mt-1">
+                      <Badge variant="outline" className="text-xs">{item.materialType}</Badge>
+                      <Badge variant="outline" className="text-xs">{item.condition}</Badge>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
 
               <div className="space-y-2 text-sm border-t border-b py-3 my-3">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Price:</span>
-                  <span>₹{item.price.toLocaleString('en-IN')}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Quantity:</span>
-                  <span>{quantity}</span>
-                </div>
-                <div className="flex justify-between font-medium">
+                {isMultiItemCheckout ? (
+                  items?.map(cartItem => (
+                    <div key={cartItem._id} className="flex justify-between text-xs">
+                      <span className="truncate max-w-[120px]">{cartItem.title}:</span>
+                      <span>₹{(cartItem.price * (quantities?.[cartItem._id] || 1)).toLocaleString('en-IN')}</span>
+                    </div>
+                  ))
+                ) : item ? (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Price:</span>
+                      <span>₹{item.price.toLocaleString('en-IN')}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Quantity:</span>
+                      <span>{quantity}</span>
+                    </div>
+                  </>
+                ) : null}
+                
+                <div className="flex justify-between font-medium pt-2 border-t">
                   <span>Total:</span>
                   <span>₹{totalPrice.toLocaleString('en-IN')}</span>
                 </div>
               </div>
 
-              <div className="text-xs text-gray-500">
-                <p className="mb-2">Seller: {item.seller.firstName} {item.seller.lastName}</p>
-                <p>Item will be shipped from pincode {item.pinCode}</p>
-              </div>
+              {!isMultiItemCheckout && item && (
+                <div className="text-xs text-gray-500">
+                  <p className="mb-2">Seller: {item.seller.firstName} {item.seller.lastName}</p>
+                  <p>Item will be shipped from pincode {item.pinCode}</p>
+                </div>
+              )}
             </div>
 
             <div className="mt-auto">
@@ -615,15 +697,17 @@ export const PaymentModal = ({ isOpen, onClose, item, onPaymentSuccess }: Paymen
                             Processing...
                           </>
                         ) : (
-                          `Pay ₹${totalPrice.toLocaleString('en-IN')} (Mock)`
+                          `Pay ₹${calculateTotalPrice().toLocaleString('en-IN')} (Mock)`
                         )}
                       </Button>
                     ) : (
                       <Elements stripe={stripePromise}>
                         <StripePaymentForm
                           item={item}
+                          items={items}
+                          quantities={quantities}
                           quantity={quantity}
-                          totalPrice={totalPrice}
+                          totalPrice={calculateTotalPrice()}
                           onSuccess={handleStripePaymentSuccess}
                           onError={handleStripePaymentError}
                           isProcessing={isProcessing}

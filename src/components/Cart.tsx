@@ -22,6 +22,7 @@ export const Cart = () => {
   const [quantities, setQuantities] = useState<{[key: string]: number}>({});
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedItem, setSelectedItem] = useState<MarketplaceItem | null>(null);
+  const [isCheckoutAll, setIsCheckoutAll] = useState(false);
 
   // Get user-specific cart key
   const getCartKey = () => {
@@ -98,6 +99,24 @@ export const Cart = () => {
     }
 
     setSelectedItem(item);
+    setIsCheckoutAll(false);
+    setShowPaymentModal(true);
+  };
+
+  const handleCheckoutAll = () => {
+    if (!user) {
+      toast.error('Please log in to checkout');
+      return;
+    }
+
+    // Check if any items are below minimum payment amount
+    const hasBelowMinimumItems = cartItems.some(item => !isAmountAboveMinimum(item.price, item.currency));
+    if (hasBelowMinimumItems) {
+      toast.error('Some items are below the minimum payment amount and cannot be purchased online.');
+      return;
+    }
+
+    setIsCheckoutAll(true);
     setShowPaymentModal(true);
   };
 
@@ -105,8 +124,13 @@ export const Cart = () => {
     toast.success('Payment successful!');
     setShowPaymentModal(false);
     
-    // Remove the purchased item from cart
-    if (selectedItem) {
+    // Remove the purchased item(s) from cart
+    if (isCheckoutAll) {
+      // Clear the entire cart
+      setCartItems([]);
+      localStorage.setItem(getCartKey(), JSON.stringify([]));
+    } else if (selectedItem) {
+      // Remove just the selected item
       handleRemoveItem(selectedItem._id);
     }
     
@@ -372,6 +396,19 @@ export const Cart = () => {
                     
                     {cartItems.length > 0 && (
                       <div className="space-y-3">
+                        {/* Checkout All Button */}
+                        {cartItems.length > 1 && (
+                          <Button
+                            className="w-full bg-green-600 hover:bg-green-700"
+                            disabled={cartItems.some(item => !isAmountAboveMinimum(item.price, item.currency))}
+                            onClick={handleCheckoutAll}
+                          >
+                            <CreditCard className="w-4 h-4 mr-2" />
+                            Checkout All Items (₹{calculateTotal().toLocaleString('en-IN')})
+                          </Button>
+                        )}
+
+                        {/* Individual Item Purchase Buttons */}
                         {cartItems.map((item) => (
                           <Button
                             key={item._id}
@@ -394,11 +431,13 @@ export const Cart = () => {
       </div>
       
       {/* Payment Modal */}
-      {showPaymentModal && selectedItem && (
+      {showPaymentModal && (
         <PaymentModal
           isOpen={showPaymentModal}
           onClose={() => setShowPaymentModal(false)}
           item={selectedItem}
+          items={isCheckoutAll ? cartItems : undefined}
+          quantities={quantities}
           onPaymentSuccess={handlePaymentSuccess}
         />
       )}
