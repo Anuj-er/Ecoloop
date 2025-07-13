@@ -15,7 +15,6 @@ import connectionRoutes from './routes/connection.js';
 import notificationRoutes from './routes/notifications.js';
 import uploadRoutes from './routes/upload.js';
 import adminRoutes from './routes/admin.js';
-import debugRoutes from './routes/debug.js';
 import marketplaceRoutes from './routes/marketplace.js';
 import paymentRoutes from './routes/payment.js';
 
@@ -74,7 +73,6 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/admin', adminRoutes);
-app.use('/api/debug', debugRoutes);
 app.use('/api/posts', postRoutes);
 app.use('/api/connections', connectionRoutes);
 app.use('/api/notifications', notificationRoutes);

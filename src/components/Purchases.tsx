@@ -7,7 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { 
   Package, Clock, CheckCircle, XCircle, MapPin, Calendar,
   Download, Eye, Star, MessageCircle, RotateCcw, CreditCard,
-  X, ChevronLeft, ChevronRight
+  X, ChevronLeft, ChevronRight, Shield, CheckCheck
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -524,6 +524,35 @@ const PurchaseDetailsModal = ({
                     Track Order
                   </Button>
                 )}
+                {purchase.status === 'escrow_held' && (
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="flex items-center gap-1"
+                    onClick={async () => {
+                      if (confirm("Confirm delivery and release payment to the seller?")) {
+                        try {
+                          const response = await api.post('/payments/confirm-delivery', {
+                            transactionId: purchase.transactionId
+                          });
+                          
+                          if (response.data.success) {
+                            toast.success('Payment released to the seller');
+                            // Update local state or refetch purchases
+                            fetchPurchases();
+                          } else {
+                            toast.error(response.data.message || 'Failed to confirm delivery');
+                          }
+                        } catch (error: any) {
+                          toast.error(error.response?.data?.message || error.message || 'Failed to confirm delivery');
+                        }
+                      }
+                    }}
+                  >
+                    <CheckCheck className="w-3 h-3" />
+                    Confirm Delivery
+                  </Button>
+                )}
               </div>
             </div>
           </div>
@@ -668,6 +697,27 @@ export const Purchases = () => {
     }
     
     return purchases.filter(purchase => purchase.status === status);
+  };
+
+  // Confirm delivery function for escrow payments
+  const confirmDelivery = async (paymentId: string) => {
+    try {
+      setLoading(true);
+      
+      const response = await api.post('/payments/confirm-delivery', { paymentId });
+      
+      if (response.data.success) {
+        toast.success('Delivery confirmed! Escrow funds have been released to the seller.');
+        fetchPurchases(); // Refresh the purchase list
+      } else {
+        throw new Error(response.data.message || 'Failed to confirm delivery');
+      }
+    } catch (error: any) {
+      console.error('Error confirming delivery:', error);
+      toast.error(error.response?.data?.message || error.message || 'Failed to confirm delivery');
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (!user) {
@@ -946,6 +996,38 @@ export const Purchases = () => {
                                 <Button variant="outline" size="sm" className="text-xs">
                                   <RotateCcw className="w-3 h-3 mr-1" />
                                   Track Order
+                                </Button>
+                              )}
+                              {purchase.status === 'escrow_held' && (
+                                <Button 
+                                  size="sm" 
+                                  className="text-xs bg-green-600 hover:bg-green-700 text-white"
+                                  onClick={async () => {
+                                    if (confirm("Have you received the item? This will release the escrowed payment to the seller.")) {
+                                      try {
+                                        setLoading(true);
+                                        const response = await api.post('/payments/confirm-delivery', {
+                                          paymentId: purchase._id
+                                        });
+                                        
+                                        if (response.data.success) {
+                                          toast.success('Delivery confirmed! Payment has been released to the seller.');
+                                          fetchPurchases();
+                                        } else {
+                                          toast.error(response.data.message || 'Failed to confirm delivery');
+                                        }
+                                      } catch (error: any) {
+                                        console.error('Error confirming delivery:', error);
+                                        toast.error(error.response?.data?.message || 'Failed to confirm delivery');
+                                      } finally {
+                                        setLoading(false);
+                                      }
+                                    }
+                                  }}
+                                  disabled={loading}
+                                >
+                                  <Shield className="w-3 h-3 mr-1" />
+                                  Confirm Delivery
                                 </Button>
                               )}
                             </div>

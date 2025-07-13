@@ -1,0 +1,12 @@
+# Hardhat files
+cache/
+artifacts/
+
+# Dependencies
+node_modules/
+
+# Deployment info
+deployment-info.json
+
+# Logs
+*.log

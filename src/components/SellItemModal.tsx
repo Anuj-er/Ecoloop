@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,8 +7,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { Upload, X, AlertTriangle, CheckCircle, Camera, Loader2 } from "lucide-react";
+import { Upload, X, AlertTriangle, CheckCircle, Camera, Loader2, Wallet, CreditCard } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Checkbox } from "@/components/ui/checkbox";
 import api from "@/lib/api";
 import { toast } from "sonner";
 import { getMinimumAmount, isAmountAboveMinimum } from "@/utils/paymentUtils";
@@ -78,6 +79,12 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
       width: 0,
       height: 0,
       weight: 0
+    },
+    paymentPreferences: {
+      acceptsFiat: true,
+      acceptsCrypto: false,
+      cryptoAddress: '',
+      escrowEnabled: true
     }
   });
 
@@ -360,6 +367,16 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
     }
   };
 
+  const handlePaymentPreferenceChange = (field: string, value: boolean | string) => {
+    setFormData(prev => ({
+      ...prev,
+      paymentPreferences: {
+        ...prev.paymentPreferences,
+        [field]: value
+      }
+    }));
+  };
+
   const isFormValid = () => {
     // Block submission only if there are truly rejected images
     const hasRejectedImages = images.some(img => img.aiAnalysis?.status === 'rejected');
@@ -419,6 +436,12 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
       if (!confirmed) {
         return; // User cancelled
       }
+    }
+
+    // Validate crypto address if crypto is accepted
+    if (formData.paymentPreferences.acceptsCrypto && !formData.paymentPreferences.cryptoAddress) {
+      toast.error('Please provide your Ethereum wallet address if accepting crypto payments');
+      return;
     }
 
     setIsSubmitting(true);
@@ -551,7 +574,13 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
       condition: '',
       category: '',
       tags: [],
-      dimensions: { length: 0, width: 0, height: 0, weight: 0 }
+      dimensions: { length: 0, width: 0, height: 0, weight: 0 },
+      paymentPreferences: {
+        acceptsFiat: true,
+        acceptsCrypto: false,
+        cryptoAddress: '',
+        escrowEnabled: true
+      }
     });
     
     images.forEach(img => URL.revokeObjectURL(img.preview));
@@ -567,13 +596,13 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+    <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Sell Your Item</DialogTitle>
+          <DialogTitle>List an Item for Sale</DialogTitle>
         </DialogHeader>
-
-        <div className="space-y-6">
+        
+        <form onSubmit={handleSubmit} className="space-y-6">
           {/* AI Warnings */}
           {aiWarnings.length > 0 && (
             <Alert variant="destructive" className="mb-4 border-2 border-red-500 shadow-md">
@@ -1192,48 +1221,108 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
               </div>
             )}
           </div>
-        </div>
 
-        {/* Action Buttons */}
-        <div className="flex justify-end gap-3 pt-4 border-t">
-          <Button variant="outline" onClick={handleClose}>
-            Cancel
-            </Button>
-            <div className="relative group">            <div className="relative group">
-              <Button 
-                onClick={handleSubmit} 
-                disabled={!isFormValid() || isSubmitting}
-                className="bg-green-600 hover:bg-green-700"
-              >
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Creating Listing...
-                  </>
-                ) : (
-                  <>
-                    <Camera className="w-4 h-4 mr-2" />
-                    List Item
-                  </>
-                )}
-              </Button>
+          {/* Payment Preferences Section */}
+          <div className="space-y-4">
+            <h3 className="text-lg font-medium">Payment Preferences</h3>
+            
+            <div className="space-y-2">
+              <div className="flex items-center space-x-2">
+                <Checkbox 
+                  id="acceptsFiat" 
+                  checked={formData.paymentPreferences.acceptsFiat}
+                  onCheckedChange={(checked) => 
+                    handlePaymentPreferenceChange('acceptsFiat', checked === true)
+                  }
+                />
+                <Label htmlFor="acceptsFiat" className="flex items-center">
+                  <CreditCard className="h-4 w-4 mr-2" />
+                  Accept Fiat Payments (INR via Stripe)
+                </Label>
+              </div>
               
-              {/* Tooltip explaining submission status */}
-              {images.some(img => img.aiAnalysis?.status === 'rejected') && (
-                <div className="absolute bottom-full mb-2 right-0 w-64 p-2 bg-red-50 border border-red-200 rounded-md shadow-lg text-xs invisible group-hover:visible transition-all z-20">
-                  <p className="font-semibold text-red-600">Cannot submit with rejected images</p>
-                  <p className="mt-1">Please remove rejected images and upload appropriate recyclable material photos.</p>
+              <div className="flex items-center space-x-2">
+                <Checkbox 
+                  id="acceptsCrypto" 
+                  checked={formData.paymentPreferences.acceptsCrypto}
+                  onCheckedChange={(checked) => 
+                    handlePaymentPreferenceChange('acceptsCrypto', checked === true)
+                  }
+                />
+                <Label htmlFor="acceptsCrypto" className="flex items-center">
+                  <Wallet className="h-4 w-4 mr-2" />
+                  Accept Crypto Payments (ETH on Sepolia Testnet)
+                </Label>
+              </div>
+              
+              {formData.paymentPreferences.acceptsCrypto && (
+                <div className="pl-6 pt-2">
+                  <Label htmlFor="cryptoAddress">Ethereum Wallet Address</Label>
+                  <Input
+                    id="cryptoAddress"
+                    placeholder="0x..."
+                    value={formData.paymentPreferences.cryptoAddress}
+                    onChange={(e) => handlePaymentPreferenceChange('cryptoAddress', e.target.value)}
+                    className="mt-1"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    This address will receive payments for your items
+                  </p>
                 </div>
               )}
-              {images.some(img => img.aiAnalysis?.status === 'warning') && !images.some(img => img.aiAnalysis?.status === 'rejected') && (
-                <div className="absolute bottom-full mb-2 right-0 w-64 p-2 bg-yellow-50 border border-yellow-200 rounded-md shadow-lg text-xs invisible group-hover:visible transition-all z-20">
-                  <p className="font-semibold text-yellow-600">Admin review required</p>
-                  <p className="mt-1">Some images need verification. Your item will be reviewed before going live.</p>
+              
+              {formData.paymentPreferences.acceptsCrypto && (
+                <div className="flex items-center space-x-2 pl-6 pt-2">
+                  <Checkbox 
+                    id="escrowEnabled" 
+                    checked={formData.paymentPreferences.escrowEnabled}
+                    onCheckedChange={(checked) => 
+                      handlePaymentPreferenceChange('escrowEnabled', checked === true)
+                    }
+                  />
+                  <Label htmlFor="escrowEnabled">
+                    Enable Escrow for Crypto Payments
+                  </Label>
                 </div>
+              )}
+              
+              {formData.paymentPreferences.acceptsCrypto && (
+                <Alert className="mt-2 bg-amber-50">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertDescription>
+                    Crypto payments use the Sepolia testnet. Make sure your wallet is configured for Sepolia.
+                  </AlertDescription>
+                </Alert>
+              )}
+              
+              {!formData.paymentPreferences.acceptsFiat && !formData.paymentPreferences.acceptsCrypto && (
+                <Alert className="mt-2 bg-red-50">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertDescription>
+                    You must accept at least one payment method.
+                  </AlertDescription>
+                </Alert>
               )}
             </div>
           </div>
-        </div>
+          
+          <div className="flex justify-end space-x-2">
+            <Button type="button" variant="outline" onClick={handleClose}>
+              Cancel
+            </Button>
+            <Button 
+              type="submit" 
+              disabled={isSubmitting || !isFormValid() || (!formData.paymentPreferences.acceptsFiat && !formData.paymentPreferences.acceptsCrypto)}
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Listing...
+                </>
+              ) : 'List Item'}
+            </Button>
+          </div>
+        </form>
       </DialogContent>
     </Dialog>
   );

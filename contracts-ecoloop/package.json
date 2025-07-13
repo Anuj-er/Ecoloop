@@ -1,0 +1,19 @@
+{
+  "name": "ecoloop-contracts",
+  "version": "1.0.0",
+  "description": "EcoLoop Smart Contracts Deployment",
+  "main": "index.js",
+  "scripts": {
+    "compile": "hardhat compile",
+    "deploy": "hardhat run scripts/deploy.js --network sepolia",
+    "verify": "hardhat verify --network sepolia"
+  },
+  "devDependencies": {
+    "@nomiclabs/hardhat-ethers": "^2.2.3",
+    "hardhat": "^2.19.0",
+    "dotenv": "^16.3.1"
+  },
+  "dependencies": {
+    "ethers": "^5.7.2"
+  }
+}

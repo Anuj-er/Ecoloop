@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Loader2, CreditCard, Wallet, AlertCircle, CheckCircle, ArrowLeft, ChevronRight } from "lucide-react";
+import { Loader2, CreditCard, Wallet, AlertCircle, CheckCircle, ArrowLeft, ChevronRight, Info } from "lucide-react";
 import { MarketplaceItem } from "@/types/marketplace";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -15,6 +15,64 @@ import { paymentAPI } from "@/lib/api";
 import MockPaymentService from "@/services/mockPaymentService";
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { ethers } from 'ethers';
+
+// Extend Window interface to include ethereum property
+declare global {
+  interface Window {
+    ethereum?: any;
+  }
+}
+
+// ABI for the EcoLoopEscrow contract
+const ESCROW_CONTRACT_ABI = [
+  {
+    "type": "function",
+    "name": "createEscrow",
+    "stateMutability": "payable",
+    "inputs": [
+      {"name": "_seller", "type": "address"},
+      {"name": "_itemId", "type": "string"}
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "confirmDelivery",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {"name": "_itemId", "type": "string"}
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "getEscrowDetails",
+    "stateMutability": "view",
+    "inputs": [
+      {"name": "_itemId", "type": "string"}
+    ],
+    "outputs": [
+      {"name": "buyer", "type": "address"},
+      {"name": "seller", "type": "address"},
+      {"name": "amount", "type": "uint256"},
+      {"name": "isDelivered", "type": "bool"},
+      {"name": "isCompleted", "type": "bool"},
+      {"name": "createdAt", "type": "uint256"}
+    ]
+  },
+  {
+    "type": "function",
+    "name": "withdraw",
+    "stateMutability": "nonpayable",
+    "inputs": [],
+    "outputs": []
+  }
+];
+
+// Contract address for the EcoLoopEscrow contract on Sepolia
+const ESCROW_CONTRACT_ADDRESS = import.meta.env.VITE_ESCROW_CONTRACT_ADDRESS || '0x0000000000000000000000000000000000000000';
 
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || 'pk_test_your_stripe_key_here');
 
@@ -221,13 +279,428 @@ const StripePaymentForm = ({
   );
 };
 
-export const PaymentModal = ({ isOpen, onClose, item, items, quantities, onPaymentSuccess }: PaymentModalProps) => {
-  const { user } = useAuth();
-  const [isProcessing, setIsProcessing] = useState(false);
+// Crypto payment form component
+const CryptoPaymentForm = ({ 
+  item, 
+  items,
+  quantities,
+  quantity, 
+  totalPrice, 
+  onSuccess, 
+  onError, 
+  isProcessing, 
+  setIsProcessing,
+  shippingInfo
+}: {
+  item: MarketplaceItem | null;
+  items?: MarketplaceItem[];
+  quantities?: {[key: string]: number};
+  quantity: number;
+  totalPrice: number;
+  onSuccess: (result: PaymentResult) => void;
+  onError: (error: string) => void;
+  isProcessing: boolean;
+  setIsProcessing: (loading: boolean) => void;
+  shippingInfo: any;
+}) => {
   const [walletConnected, setWalletConnected] = useState(false);
   const [walletAddress, setWalletAddress] = useState('');
   const [walletBalance, setWalletBalance] = useState('0');
+  const [ethAmount, setEthAmount] = useState('0');
   const [ethPrice, setEthPrice] = useState(0);
+  const [useEscrow, setUseEscrow] = useState(true);
+  const { user } = useAuth();
+  
+  // Determine if we're in multi-item checkout mode
+  const isMultiItemCheckout = !!items && items.length > 0;
+
+  useEffect(() => {
+    // Check if wallet is already connected
+    checkWalletConnection();
+    
+    // Convert price to ETH
+    convertPriceToEth();
+  }, []);
+  
+  const checkWalletConnection = async () => {
+    try {
+      if (window.ethereum) {
+        const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+        if (accounts.length > 0) {
+          setWalletConnected(true);
+          setWalletAddress(accounts[0]);
+          
+          // Get wallet balance
+          const balance = await paymentService.getWalletBalance(accounts[0]);
+          setWalletBalance(balance);
+        }
+      }
+    } catch (error) {
+      console.error('Error checking wallet connection:', error);
+    }
+  };
+  
+  const convertPriceToEth = async () => {
+    try {
+      // Get current ETH price
+      const ethToInr = 200000; // Mock rate: 1 ETH = 200,000 INR
+      setEthPrice(ethToInr);
+      
+      // Convert total price to ETH
+      const ethAmount = totalPrice / ethToInr;
+      setEthAmount(ethAmount.toFixed(6));
+    } catch (error) {
+      console.error('Error converting price to ETH:', error);
+    }
+  };
+  
+  const connectWallet = async () => {
+    try {
+      setIsProcessing(true);
+      
+      // Check if on Sepolia testnet
+      if (window.ethereum) {
+        const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+        
+        // Sepolia testnet chain ID is 0xaa36a7 (11155111 in decimal)
+        if (chainId !== '0xaa36a7') {
+          try {
+            // Try to switch to Sepolia
+            await window.ethereum.request({
+              method: 'wallet_switchEthereumChain',
+              params: [{ chainId: '0xaa36a7' }],
+            });
+          } catch (switchError: any) {
+            // If Sepolia is not added, add it
+            if (switchError.code === 4902) {
+              await window.ethereum.request({
+                method: 'wallet_addEthereumChain',
+                params: [
+                  {
+                    chainId: '0xaa36a7',
+                    chainName: 'Sepolia Testnet',
+                    nativeCurrency: {
+                      name: 'Sepolia ETH',
+                      symbol: 'ETH',
+                      decimals: 18,
+                    },
+                    rpcUrls: ['https://sepolia.infura.io/v3/'],
+                    blockExplorerUrls: ['https://sepolia.etherscan.io'],
+                  },
+                ],
+              });
+            } else {
+              throw switchError;
+            }
+          }
+        }
+        
+        // Connect wallet
+        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+        setWalletConnected(true);
+        setWalletAddress(accounts[0]);
+        
+        // Get wallet balance
+        const balance = await paymentService.getWalletBalance(accounts[0]);
+        setWalletBalance(balance);
+        
+        toast.success('Wallet connected successfully!');
+      } else {
+        toast.error('Please install MetaMask to make crypto payments');
+      }
+    } catch (error: any) {
+      console.error('Error connecting wallet:', error);
+      toast.error(`Failed to connect wallet: ${error.message}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const disconnectWallet = () => {
+    setWalletConnected(false);
+    setWalletAddress('');
+    setWalletBalance('0');
+    toast.success('Wallet disconnected');
+  };
+  
+  const handleCryptoPayment = async () => {
+    if (!walletConnected) {
+      onError('Please connect your wallet first');
+      return;
+    }
+    
+    setIsProcessing(true);
+    
+    try {
+      let transactionHash;
+      
+      // Debug logging
+      console.log('🔍 Payment Debug Info:');
+      console.log('- Item:', item);
+      console.log('- Use Escrow:', useEscrow);
+      console.log('- Escrow Contract Address:', ESCROW_CONTRACT_ADDRESS);
+      console.log('- Seller Crypto Address:', item?.paymentPreferences?.cryptoAddress);
+      console.log('- Wallet Address:', walletAddress);
+      console.log('- ETH Amount:', ethAmount);
+      
+      if (useEscrow) {
+        // Use escrow contract for payment
+        if (!window.ethereum) throw new Error('MetaMask not installed');
+        
+        const provider = new ethers.providers.Web3Provider(window.ethereum);
+        const signer = provider.getSigner();
+        
+        // Create contract instance
+        const escrowContract = new ethers.Contract(
+          ESCROW_CONTRACT_ADDRESS,
+          ESCROW_CONTRACT_ABI,
+          signer
+        );
+        
+        // Get seller's address
+        const sellerAddress = item?.paymentPreferences?.cryptoAddress;
+        if (!sellerAddress) throw new Error('Seller crypto address not found');
+        
+        console.log('📋 Checking for existing escrow...');
+        
+        // Create a unique escrow ID by combining item ID and buyer address
+        // This allows multiple buyers to create escrows for the same item
+        const currentAddress = await signer.getAddress();
+        const uniqueEscrowId = `${item?._id}-${currentAddress.toLowerCase()}`;
+        
+        console.log('Using unique escrow ID:', uniqueEscrowId);
+        
+        // Check if escrow already exists for this unique ID
+        try {
+          const escrowDetails = await escrowContract.getEscrowDetails(uniqueEscrowId);
+          const escrowExists = escrowDetails.buyer !== '0x0000000000000000000000000000000000000000';
+          
+          if (escrowExists) {
+            console.log('⚠️ You already have an escrow for this item:');
+            console.log('- Buyer:', escrowDetails.buyer);
+            console.log('- Seller:', escrowDetails.seller);
+            console.log('- Amount:', ethers.utils.formatEther(escrowDetails.amount), 'ETH');
+            console.log('- Is Delivered:', escrowDetails.isDelivered);
+            console.log('- Is Completed:', escrowDetails.isCompleted);
+            
+            throw new Error('You already have an active escrow for this item. Please check your purchase history.');
+          }
+        } catch (error: any) {
+          // If it's our custom error about existing escrow, throw it
+          if (error.message.includes('already have an active escrow')) {
+            throw error;
+          }
+          // Otherwise, continue (might be a contract call error for non-existent escrow)
+          console.log('No existing escrow found for unique ID (or error checking):', error.message);
+        }
+        
+        console.log('📋 Creating new escrow with:');
+        console.log('- Seller Address:', sellerAddress);
+        console.log('- Unique Escrow ID:', uniqueEscrowId);
+        console.log('- Amount:', ethAmount, 'ETH');
+        
+        // Create escrow transaction with unique ID
+        const tx = await escrowContract.createEscrow(
+          sellerAddress,
+          uniqueEscrowId,
+          {
+            value: ethers.utils.parseEther(ethAmount),
+            gasLimit: 300000
+          }
+        );
+        
+        console.log('⏳ Transaction sent:', tx.hash);
+        
+        // Wait for transaction to be mined
+        const receipt = await tx.wait();
+        transactionHash = receipt.transactionHash;
+        
+        console.log('✅ Escrow created:', transactionHash);
+      } else {
+        // Direct payment
+        if (!window.ethereum) throw new Error('MetaMask not installed');
+        
+        const provider = new ethers.providers.Web3Provider(window.ethereum);
+        const signer = provider.getSigner();
+        
+        // Get seller's address
+        const sellerAddress = item?.paymentPreferences?.cryptoAddress;
+        if (!sellerAddress) throw new Error('Seller crypto address not found');
+        
+        console.log('💸 Sending direct payment to:', sellerAddress);
+        
+        // Send ETH directly to seller
+        const tx = await signer.sendTransaction({
+          to: sellerAddress,
+          value: ethers.utils.parseEther(ethAmount)
+        });
+        
+        // Wait for transaction to be mined
+        const receipt = await tx.wait();
+        transactionHash = receipt.transactionHash;
+        
+        console.log('✅ Direct payment sent:', transactionHash);
+      }
+      
+      if (!transactionHash) throw new Error('Transaction failed');
+      
+      // Notify backend about the crypto payment
+      const paymentData = {
+        itemId: item?._id,
+        quantity,
+        transactionHash,
+        walletAddress,
+        useEscrow
+      };
+      
+      console.log('📤 Sending to backend:', paymentData);
+      
+      const response = await paymentAPI.processCryptoPayment(paymentData);
+      
+      console.log('📥 Backend response:', response.data);
+      
+      if (response.data.success) {
+        onSuccess({
+          success: true,
+          transactionHash,
+          transactionId: response.data.paymentId
+        });
+      } else {
+        throw new Error(response.data.message || 'Payment verification failed');
+      }
+    } catch (error: any) {
+      console.error('❌ Crypto payment error:', error);
+      onError(`Payment failed: ${error.message}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+  
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center">
+            <Wallet className="w-5 h-5 mr-2" />
+            Crypto Payment (ETH on Sepolia Testnet)
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex justify-between items-center">
+            <span>Amount:</span>
+            <span className="font-semibold">{ethAmount} ETH</span>
+          </div>
+          
+          <div className="flex justify-between items-center">
+            <span>Conversion Rate:</span>
+            <span>1 ETH = ₹{ethPrice.toLocaleString('en-IN')}</span>
+          </div>
+          
+          {item?.paymentPreferences?.escrowEnabled && (
+            <div className="flex items-center space-x-2 border p-2 rounded-md bg-blue-50">
+              <input
+                type="checkbox"
+                id="useEscrow"
+                checked={useEscrow}
+                onChange={(e) => setUseEscrow(e.target.checked)}
+                className="rounded"
+              />
+              <Label htmlFor="useEscrow" className="flex items-center cursor-pointer">
+                <Info className="w-4 h-4 mr-1 text-blue-500" />
+                Use Escrow Protection
+              </Label>
+            </div>
+          )}
+          
+          {useEscrow && (
+            <Alert className="bg-blue-50 border-blue-200">
+              <Info className="h-4 w-4 text-blue-500" />
+              <AlertDescription className="text-sm">
+                Escrow protection holds your payment until you confirm delivery of the item. This protects both buyers and sellers.
+              </AlertDescription>
+            </Alert>
+          )}
+          
+          {walletConnected ? (
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <span>Wallet:</span>
+                <span className="font-mono text-sm truncate max-w-[200px]">{walletAddress}</span>
+              </div>
+              
+              <div className="flex justify-between items-center">
+                <span>Balance:</span>
+                <span>{parseFloat(walletBalance).toFixed(4)} ETH</span>
+              </div>
+              
+              {parseFloat(walletBalance) < parseFloat(ethAmount) && (
+                <Alert className="bg-red-50 border-red-200">
+                  <AlertCircle className="h-4 w-4 text-red-500" />
+                  <AlertDescription className="text-sm">
+                    Insufficient balance. You need at least {ethAmount} ETH.
+                  </AlertDescription>
+                </Alert>
+              )}
+              
+              <div className="flex gap-2">
+                <Button
+                  onClick={handleCryptoPayment}
+                  disabled={isProcessing || parseFloat(walletBalance) < parseFloat(ethAmount)}
+                  className="flex-1"
+                >
+                  {isProcessing ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    `Pay ${ethAmount} ETH`
+                  )}
+                </Button>
+                
+                <Button
+                  onClick={disconnectWallet}
+                  disabled={isProcessing}
+                  variant="outline"
+                  size="sm"
+                  className="px-3"
+                >
+                  Disconnect
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button
+              onClick={connectWallet}
+              disabled={isProcessing}
+              className="w-full"
+            >
+              {isProcessing ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Connecting...
+                </>
+              ) : (
+                'Connect Wallet'
+              )}
+            </Button>
+          )}
+          
+          <Alert className="bg-amber-50 border-amber-200">
+            <AlertCircle className="h-4 w-4 text-amber-500" />
+            <AlertDescription className="text-sm">
+              This is using the Sepolia testnet. Make sure your wallet is configured for Sepolia.
+            </AlertDescription>
+          </Alert>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+export const PaymentModal = ({ isOpen, onClose, item, items, quantities, onPaymentSuccess }: PaymentModalProps) => {
+  const { user } = useAuth();
+  const [isProcessing, setIsProcessing] = useState(false);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'crypto' | 'fiat'>('fiat');
   const [quantity, setQuantity] = useState(1);
   const [currentStep, setCurrentStep] = useState<'shipping' | 'payment'>('shipping');
@@ -248,139 +721,70 @@ export const PaymentModal = ({ isOpen, onClose, item, items, quantities, onPayme
   
   // Calculate totals for multi-item checkout
   const calculateTotalPrice = () => {
-    if (isMultiItemCheckout && items && quantities) {
+    if (isMultiItemCheckout && items) {
       return items.reduce((total, item) => {
-        const itemQuantity = quantities[item._id] || 1;
+        const itemQuantity = quantities?.[item._id] || 1;
         return total + (item.price * itemQuantity);
       }, 0);
+    } else if (item) {
+      return item.price * quantity;
     }
-    
-    return item ? item.price * quantity : 0;
+    return 0;
   };
 
-  // Country code to name mapping
-  const countryNames: Record<string, string> = {
-    'IN': 'India',
-    'US': 'United States',
-    'GB': 'United Kingdom',
-    'CA': 'Canada',
-    'AU': 'Australia'
-  };
-
-  useEffect(() => {
-    if (isOpen) {
-      checkWalletConnection();
-      convertPriceToEth();
-    }
-  }, [isOpen, calculateTotalPrice()]);
-
-  const checkWalletConnection = async () => {
-    if (paymentService.isMetaMaskAvailable()) {
-      try {
-        const accounts = await paymentService.connectWallet();
-        if (accounts.length > 0) {
-          setWalletConnected(true);
-          setWalletAddress(accounts[0]);
-          const balance = await paymentService.getWalletBalance(accounts[0]);
-          setWalletBalance(balance);
-        }
-      } catch (error) {
-        console.log('Wallet not connected');
-      }
-    }
-  };
-
-  const convertPriceToEth = async () => {
-    try {
-      const totalPrice = calculateTotalPrice();
-      const ethAmount = await paymentService.convertUsdToEth(totalPrice);
-      setEthPrice(ethAmount);
-    } catch (error) {
-      console.error('Failed to convert price to ETH:', error);
-    }
-  };
-
-  const connectWallet = async () => {
-    try {
-      setIsProcessing(true);
-      const accounts = await paymentService.connectWallet();
-      if (accounts.length > 0) {
-        setWalletConnected(true);
-        setWalletAddress(accounts[0]);
-        const balance = await paymentService.getWalletBalance(accounts[0]);
-        setWalletBalance(balance);
-        toast.success('Wallet connected successfully!');
-      }
-    } catch (error) {
-      toast.error((error as Error).message);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  // Process fiat payment using Stripe with backend integration
-  const processFiatPayment = async (): Promise<PaymentResult> => {
-    // Check if we're in mock mode
-    const paymentMode = import.meta.env.VITE_PAYMENT_MODE;
-    
-    if (paymentMode === 'mock') {
-      toast.info('Using mock payment for testing...');
-      return await MockPaymentService.processMockPayment(calculateTotalPrice(), item?.currency || 'INR');
-    }
-
-    // For Stripe, this will be handled by the StripePaymentForm component
-    return { success: false, error: 'Use Stripe payment form' };
-  };
-
-  const handleCryptoPayment = async () => {
-    if (!user) {
-      toast.error('Please login to make a purchase');
-      return;
-    }
-
-    setIsProcessing(true);
-
-    try {
-      const paymentDetails: PaymentDetails = {
-        itemId: item?._id,
-        sellerId: item?.seller._id,
-        buyerId: user._id,
-        amount: ethPrice,
-        currency: 'ETH',
-        paymentMethod: {
-          type: 'crypto',
-          currency: 'ETH',
-          network: 'ethereum'
-        },
-        shippingInfo
-      };
+  const totalPrice = calculateTotalPrice();
+  
+  // Determine available payment methods based on seller preferences
+  const getAvailablePaymentMethods = () => {
+    if (isMultiItemCheckout && items) {
+      // For multi-item checkout, only show payment methods that all sellers accept
+      const allAcceptFiat = items.every(item => item.paymentPreferences?.acceptsFiat !== false);
+      const allAcceptCrypto = items.every(item => item.paymentPreferences?.acceptsCrypto === true);
       
-      const result = await paymentService.processCryptoPayment(paymentDetails);
-
-      if (result.success) {
-        toast.success('Payment successful!');
-        onPaymentSuccess(result);
-        onClose();
-      } else {
-        toast.error(result.error || 'Payment failed');
-      }
-    } catch (error) {
-      toast.error('Payment failed: ' + (error as Error).message);
-    } finally {
-      setIsProcessing(false);
+      return {
+        fiat: allAcceptFiat,
+        crypto: allAcceptCrypto
+      };
+    } else if (item) {
+      return {
+        fiat: item.paymentPreferences?.acceptsFiat !== false,
+        crypto: item.paymentPreferences?.acceptsCrypto === true
+      };
     }
+    
+    // Default if no item data available
+    return { fiat: true, crypto: false };
   };
+  
+  const availablePaymentMethods = getAvailablePaymentMethods();
+  
+  // Set default payment method based on available methods
+  useEffect(() => {
+    if (!availablePaymentMethods.fiat && availablePaymentMethods.crypto) {
+      setSelectedPaymentMethod('crypto');
+    } else {
+      setSelectedPaymentMethod('fiat');
+    }
+  }, [availablePaymentMethods]);
 
   const handleStripePaymentSuccess = (result: PaymentResult) => {
-    console.log('Stripe payment successful:', result);
-    toast.success('Payment successful! Your order is being processed.');
     onPaymentSuccess(result);
     onClose();
   };
 
   const handleStripePaymentError = (error: string) => {
-    console.error('Stripe payment error:', error);
     toast.error(error);
+    setIsProcessing(false);
+  };
+  
+  const handleCryptoPaymentSuccess = (result: PaymentResult) => {
+    onPaymentSuccess(result);
+    onClose();
+  };
+
+  const handleCryptoPaymentError = (error: string) => {
+    toast.error(error);
+    setIsProcessing(false);
   };
 
   const handleShippingInfoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -392,15 +796,18 @@ export const PaymentModal = ({ isOpen, onClose, item, items, quantities, onPayme
   };
 
   const validateShippingInfo = () => {
-    const requiredFields = ['fullName', 'addressLine1', 'city', 'state', 'postalCode', 'phone', 'email'];
-    const missingFields = requiredFields.filter(field => !shippingInfo[field as keyof typeof shippingInfo]);
+    const requiredFields = ['fullName', 'addressLine1', 'city', 'state', 'postalCode', 'phone'];
+    for (const field of requiredFields) {
+      if (!shippingInfo[field as keyof typeof shippingInfo]) {
+        toast.error(`Please fill in ${field.replace(/([A-Z])/g, ' $1').toLowerCase()}`);
+        return false;
+      }
+    }
     
-    if (missingFields.length > 0) {
-      const formattedFields = missingFields.map(field => 
-        field.replace(/([A-Z])/g, ' $1').toLowerCase()
-      ).join(', ');
-      
-      toast.error(`Please fill in the following fields: ${formattedFields}`);
+    // Validate phone number
+    const phoneRegex = /^\d{10}$/;
+    if (!phoneRegex.test(shippingInfo.phone)) {
+      toast.error('Please enter a valid 10-digit phone number');
       return false;
     }
     
@@ -413,395 +820,201 @@ export const PaymentModal = ({ isOpen, onClose, item, items, quantities, onPayme
     }
   };
 
-  const totalPrice = calculateTotalPrice();
-  const totalEthPrice = ethPrice * quantity;
-
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-3xl p-0 overflow-hidden" aria-describedby="payment-dialog-description">
-        <div className="flex h-[80vh] max-h-[600px]">
-          {/* Left panel - Order summary */}
-          <div className="w-1/3 bg-gray-50 p-6 border-r">
-            <div className="mb-6">
-              <h3 className="font-semibold text-lg mb-4">Order Summary</h3>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>
+            {currentStep === 'shipping' ? 'Shipping Information' : 'Complete Payment'}
+          </DialogTitle>
+          <DialogDescription>
+            {currentStep === 'shipping' 
+              ? 'Enter your shipping details to continue' 
+              : `Total: ₹${totalPrice.toLocaleString('en-IN')}`}
+          </DialogDescription>
+        </DialogHeader>
+
+        {currentStep === 'shipping' ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-2">
+                <Label htmlFor="fullName">Full Name</Label>
+                <Input 
+                  id="fullName" 
+                  name="fullName" 
+                  value={shippingInfo.fullName} 
+                  onChange={handleShippingInfoChange}
+                  placeholder="Enter your full name"
+                />
+              </div>
               
-              {isMultiItemCheckout && items ? (
-                <div className="space-y-4">
-                  <p className="text-sm font-medium">{items.length} items in cart</p>
-                  <div className="max-h-[200px] overflow-y-auto space-y-3">
-                    {items.map(cartItem => (
-                      <div key={cartItem._id} className="flex gap-2 pb-2 border-b">
-                        <img
-                          src={cartItem.images?.[0]?.url || '/placeholder.svg'}
-                          alt={cartItem.title}
-                          className="w-10 h-10 object-cover rounded-sm"
-                        />
-                        <div className="flex-1">
-                          <p className="text-xs font-medium truncate">{cartItem.title}</p>
-                          <div className="flex justify-between text-xs text-gray-600">
-                            <span>x{quantities?.[cartItem._id] || 1}</span>
-                            <span>₹{cartItem.price.toLocaleString('en-IN')}</span>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : item ? (
-                <div className="flex gap-3 mb-4">
-                  <img
-                    src={item.images?.[0]?.url || '/placeholder.svg'}
-                    alt={item.title}
-                    className="w-16 h-16 object-cover rounded-lg"
-                  />
-                  <div>
-                    <h4 className="font-medium text-sm">{item.title}</h4>
-                    <div className="flex items-center gap-1 mt-1">
-                      <Badge variant="outline" className="text-xs">{item.materialType}</Badge>
-                      <Badge variant="outline" className="text-xs">{item.condition}</Badge>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-
-              <div className="space-y-2 text-sm border-t border-b py-3 my-3">
-                {isMultiItemCheckout ? (
-                  items?.map(cartItem => (
-                    <div key={cartItem._id} className="flex justify-between text-xs">
-                      <span className="truncate max-w-[120px]">{cartItem.title}:</span>
-                      <span>₹{(cartItem.price * (quantities?.[cartItem._id] || 1)).toLocaleString('en-IN')}</span>
-                    </div>
-                  ))
-                ) : item ? (
-                  <>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Price:</span>
-                      <span>₹{item.price.toLocaleString('en-IN')}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Quantity:</span>
-                      <span>{quantity}</span>
-                    </div>
-                  </>
-                ) : null}
-                
-                <div className="flex justify-between font-medium pt-2 border-t">
-                  <span>Total:</span>
-                  <span>₹{totalPrice.toLocaleString('en-IN')}</span>
-                </div>
+              <div className="col-span-2">
+                <Label htmlFor="addressLine1">Address Line 1</Label>
+                <Input 
+                  id="addressLine1" 
+                  name="addressLine1" 
+                  value={shippingInfo.addressLine1} 
+                  onChange={handleShippingInfoChange}
+                  placeholder="Street address, P.O. box"
+                />
               </div>
-
-              {!isMultiItemCheckout && item && (
-                <div className="text-xs text-gray-500">
-                  <p className="mb-2">Seller: {item.seller.firstName} {item.seller.lastName}</p>
-                  <p>Item will be shipped from pincode {item.pinCode}</p>
-                </div>
-              )}
+              
+              <div className="col-span-2">
+                <Label htmlFor="addressLine2">Address Line 2 (Optional)</Label>
+                <Input 
+                  id="addressLine2" 
+                  name="addressLine2" 
+                  value={shippingInfo.addressLine2} 
+                  onChange={handleShippingInfoChange}
+                  placeholder="Apartment, suite, unit, building, floor"
+                />
+              </div>
+              
+              <div>
+                <Label htmlFor="city">City</Label>
+                <Input 
+                  id="city" 
+                  name="city" 
+                  value={shippingInfo.city} 
+                  onChange={handleShippingInfoChange}
+                  placeholder="City"
+                />
+              </div>
+              
+              <div>
+                <Label htmlFor="state">State</Label>
+                <Input 
+                  id="state" 
+                  name="state" 
+                  value={shippingInfo.state} 
+                  onChange={handleShippingInfoChange}
+                  placeholder="State"
+                />
+              </div>
+              
+              <div>
+                <Label htmlFor="postalCode">Postal Code</Label>
+                <Input 
+                  id="postalCode" 
+                  name="postalCode" 
+                  value={shippingInfo.postalCode} 
+                  onChange={handleShippingInfoChange}
+                  placeholder="Postal code"
+                />
+              </div>
+              
+              <div>
+                <Label htmlFor="country">Country</Label>
+                <Input 
+                  id="country" 
+                  name="country" 
+                  value={shippingInfo.country} 
+                  onChange={handleShippingInfoChange}
+                  placeholder="Country code (e.g. IN)"
+                />
+              </div>
+              
+              <div>
+                <Label htmlFor="phone">Phone</Label>
+                <Input 
+                  id="phone" 
+                  name="phone" 
+                  value={shippingInfo.phone} 
+                  onChange={handleShippingInfoChange}
+                  placeholder="Phone number"
+                />
+              </div>
+              
+              <div>
+                <Label htmlFor="email">Email</Label>
+                <Input 
+                  id="email" 
+                  name="email" 
+                  value={shippingInfo.email} 
+                  onChange={handleShippingInfoChange}
+                  placeholder="Email address"
+                />
+              </div>
             </div>
-
-            <div className="mt-auto">
-              {currentStep === 'payment' && (
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="w-full"
-                  onClick={() => setCurrentStep('shipping')}
+            
+            <div className="flex justify-end">
+              <Button onClick={handleContinueToPayment}>
+                Continue to Payment
+                <ChevronRight className="w-4 h-4 ml-1" />
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => setCurrentStep('shipping')}
+              className="mb-2"
+            >
+              <ArrowLeft className="w-4 h-4 mr-1" />
+              Back to Shipping
+            </Button>
+            
+            {/* Payment Method Selection */}
+            <Tabs 
+              defaultValue={selectedPaymentMethod} 
+              onValueChange={(value) => setSelectedPaymentMethod(value as 'fiat' | 'crypto')}
+              className="w-full"
+            >
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger 
+                  value="fiat" 
+                  disabled={!availablePaymentMethods.fiat}
+                  className="flex items-center justify-center"
                 >
-                  <ArrowLeft className="w-3 h-3 mr-2" />
-                  Back to Shipping
-                </Button>
-              )}
-            </div>
+                  <CreditCard className="w-4 h-4 mr-2" />
+                  Card Payment
+                </TabsTrigger>
+                <TabsTrigger 
+                  value="crypto" 
+                  disabled={!availablePaymentMethods.crypto}
+                  className="flex items-center justify-center"
+                >
+                  <Wallet className="w-4 h-4 mr-2" />
+                  Crypto (ETH)
+                </TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="fiat" className="mt-4">
+                <Elements stripe={stripePromise}>
+                  <StripePaymentForm
+                    item={item}
+                    items={items}
+                    quantities={quantities}
+                    quantity={quantity}
+                    totalPrice={totalPrice}
+                    onSuccess={handleStripePaymentSuccess}
+                    onError={handleStripePaymentError}
+                    isProcessing={isProcessing}
+                    setIsProcessing={setIsProcessing}
+                    shippingInfo={shippingInfo}
+                  />
+                </Elements>
+              </TabsContent>
+              
+              <TabsContent value="crypto" className="mt-4">
+                <CryptoPaymentForm
+                  item={item}
+                  items={items}
+                  quantities={quantities}
+                  quantity={quantity}
+                  totalPrice={totalPrice}
+                  onSuccess={handleCryptoPaymentSuccess}
+                  onError={handleCryptoPaymentError}
+                  isProcessing={isProcessing}
+                  setIsProcessing={setIsProcessing}
+                  shippingInfo={shippingInfo}
+                />
+              </TabsContent>
+            </Tabs>
           </div>
-
-          {/* Right panel - Form content */}
-          <div className="w-2/3 p-6 overflow-y-auto">
-            <DialogHeader className="mb-6 pb-2 border-b">
-              <DialogTitle>
-                {currentStep === 'shipping' ? 'Shipping Information' : 'Payment Method'}
-              </DialogTitle>
-              <DialogDescription id="payment-dialog-description" className="text-sm">
-                {currentStep === 'shipping' 
-                  ? 'Please enter your shipping details to continue with your purchase.' 
-                  : 'Complete your purchase by selecting a payment method.'}
-              </DialogDescription>
-            </DialogHeader>
-
-            {currentStep === 'shipping' ? (
-              /* Shipping Information Form */
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="fullName">Full Name*</Label>
-                    <Input 
-                      id="fullName"
-                      name="fullName"
-                      value={shippingInfo.fullName}
-                      onChange={handleShippingInfoChange}
-                      placeholder="Enter your full name"
-                    />
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="email">Email*</Label>
-                    <Input 
-                      id="email"
-                      name="email"
-                      type="email"
-                      value={shippingInfo.email}
-                      onChange={handleShippingInfoChange}
-                      placeholder="Enter your email"
-                    />
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="phone">Phone Number*</Label>
-                    <Input 
-                      id="phone"
-                      name="phone"
-                      value={shippingInfo.phone}
-                      onChange={handleShippingInfoChange}
-                      placeholder="Enter your phone number"
-                    />
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="country">Country*</Label>
-                    <Input 
-                      id="country"
-                      name="country"
-                      value={countryNames[shippingInfo.country] || shippingInfo.country}
-                      onChange={handleShippingInfoChange}
-                      disabled
-                    />
-                  </div>
-                  
-                  <div className="col-span-2 space-y-2">
-                    <Label htmlFor="addressLine1">Address Line 1*</Label>
-                    <Input 
-                      id="addressLine1"
-                      name="addressLine1"
-                      value={shippingInfo.addressLine1}
-                      onChange={handleShippingInfoChange}
-                      placeholder="Street address, P.O. box, etc."
-                    />
-                  </div>
-                  
-                  <div className="col-span-2 space-y-2">
-                    <Label htmlFor="addressLine2">Address Line 2</Label>
-                    <Input 
-                      id="addressLine2"
-                      name="addressLine2"
-                      value={shippingInfo.addressLine2}
-                      onChange={handleShippingInfoChange}
-                      placeholder="Apartment, suite, unit, building, floor, etc."
-                    />
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="city">City*</Label>
-                    <Input 
-                      id="city"
-                      name="city"
-                      value={shippingInfo.city}
-                      onChange={handleShippingInfoChange}
-                      placeholder="Enter your city"
-                    />
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="state">State*</Label>
-                    <Input 
-                      id="state"
-                      name="state"
-                      value={shippingInfo.state}
-                      onChange={handleShippingInfoChange}
-                      placeholder="Enter your state"
-                    />
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="postalCode">Postal Code*</Label>
-                    <Input 
-                      id="postalCode"
-                      name="postalCode"
-                      value={shippingInfo.postalCode}
-                      onChange={handleShippingInfoChange}
-                      placeholder="Enter your postal code"
-                    />
-                  </div>
-                </div>
-                
-                <div className="pt-4 mt-4 border-t">
-                  <Button 
-                    className="w-full" 
-                    onClick={handleContinueToPayment}
-                  >
-                    Continue to Payment
-                    <ChevronRight className="ml-2 h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              /* Payment Method Selection */
-              <div className="space-y-6">
-                {/* Shipping Summary */}
-                <div className="bg-gray-50 p-3 rounded-md mb-6">
-                  <h4 className="font-medium text-sm mb-2">Shipping To:</h4>
-                  <div className="text-sm text-gray-600">
-                    <p className="font-medium">{shippingInfo.fullName}</p>
-                    <p>{shippingInfo.addressLine1}</p>
-                    {shippingInfo.addressLine2 && <p>{shippingInfo.addressLine2}</p>}
-                    <p>{shippingInfo.city}, {shippingInfo.state} {shippingInfo.postalCode}</p>
-                    <p>{countryNames[shippingInfo.country] || shippingInfo.country}</p>
-                  </div>
-                </div>
-
-                <Tabs value={selectedPaymentMethod} onValueChange={(value) => setSelectedPaymentMethod(value as 'crypto' | 'fiat')}>
-                  <TabsList className="grid w-full grid-cols-2 mb-6">
-                    <TabsTrigger value="fiat" className="flex items-center gap-2">
-                      <CreditCard className="w-4 h-4" />
-                      Card Payment
-                    </TabsTrigger>
-                    <TabsTrigger value="crypto" className="flex items-center gap-2">
-                      <Wallet className="w-4 h-4" />
-                      Cryptocurrency
-                    </TabsTrigger>
-                  </TabsList>
-
-                  <TabsContent value="fiat" className="space-y-4">
-                    <div className="flex items-center gap-2 text-sm text-gray-600 mb-4">
-                      <CheckCircle className="w-4 h-4 text-green-600" />
-                      Secure payment via Stripe
-                    </div>
-                    
-                    {/* Check if we're in mock mode */}
-                    {import.meta.env.VITE_PAYMENT_MODE === 'mock' ? (
-                      <Button
-                        onClick={async () => {
-                          setIsProcessing(true);
-                          const result = await processFiatPayment();
-                          if (result.success) {
-                            handleStripePaymentSuccess(result);
-                          } else {
-                            handleStripePaymentError(result.error || 'Payment failed');
-                          }
-                          setIsProcessing(false);
-                        }}
-                        disabled={isProcessing}
-                        className="w-full"
-                      >
-                        {isProcessing ? (
-                          <>
-                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                            Processing...
-                          </>
-                        ) : (
-                          `Pay ₹${calculateTotalPrice().toLocaleString('en-IN')} (Mock)`
-                        )}
-                      </Button>
-                    ) : (
-                      <Elements stripe={stripePromise}>
-                        <StripePaymentForm
-                          item={item}
-                          items={items}
-                          quantities={quantities}
-                          quantity={quantity}
-                          totalPrice={calculateTotalPrice()}
-                          onSuccess={handleStripePaymentSuccess}
-                          onError={handleStripePaymentError}
-                          isProcessing={isProcessing}
-                          setIsProcessing={setIsProcessing}
-                          shippingInfo={shippingInfo}
-                        />
-                      </Elements>
-                    )}
-                  </TabsContent>
-
-                  <TabsContent value="crypto" className="space-y-4">
-                    {!paymentService.isMetaMaskAvailable() ? (
-                      <div className="flex items-center gap-2 p-4 bg-yellow-50 rounded-lg">
-                        <AlertCircle className="w-5 h-5 text-yellow-600" />
-                        <div>
-                          <p className="font-medium text-yellow-800">MetaMask Required</p>
-                          <p className="text-sm text-yellow-600">
-                            Please install MetaMask to pay with cryptocurrency.
-                          </p>
-                        </div>
-                      </div>
-                    ) : !walletConnected ? (
-                      <div className="space-y-4">
-                        <div className="flex items-center gap-2 p-4 bg-blue-50 rounded-lg">
-                          <Wallet className="w-5 h-5 text-blue-600" />
-                          <div>
-                            <p className="font-medium text-blue-800">Connect Your Wallet</p>
-                            <p className="text-sm text-blue-600">
-                              Connect your MetaMask wallet to pay with ETH.
-                            </p>
-                          </div>
-                        </div>
-                        <Button onClick={connectWallet} disabled={isProcessing} className="w-full">
-                          {isProcessing ? (
-                            <>
-                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                              Connecting...
-                            </>
-                          ) : (
-                            'Connect Wallet'
-                          )}
-                        </Button>
-                      </div>
-                    ) : (
-                      <div className="space-y-4">
-                        <div className="p-4 bg-green-50 rounded-lg">
-                          <div className="flex items-center gap-2 mb-2">
-                            <CheckCircle className="w-5 h-5 text-green-600" />
-                            <span className="font-medium text-green-800">Wallet Connected</span>
-                          </div>
-                          <div className="flex justify-between items-center text-sm">
-                            <span>Wallet Address:</span>
-                            <span className="font-mono">
-                              {walletAddress.substring(0, 6)}...{walletAddress.substring(walletAddress.length - 4)}
-                            </span>
-                          </div>
-                          <div className="flex justify-between items-center text-sm">
-                            <span>Balance:</span>
-                            <span>{parseFloat(walletBalance).toFixed(4)} ETH</span>
-                          </div>
-                          <div className="flex justify-between items-center text-sm">
-                            <span>Price in ETH:</span>
-                            <span>{totalEthPrice.toFixed(6)} ETH</span>
-                          </div>
-                        </div>
-                        
-                        <Button 
-                          onClick={handleCryptoPayment}
-                          disabled={isProcessing || parseFloat(walletBalance) < totalEthPrice}
-                          className="w-full"
-                        >
-                          {isProcessing ? (
-                            <>
-                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                              Processing...
-                            </>
-                          ) : (
-                            `Pay ${totalEthPrice.toFixed(6)} ETH`
-                          )}
-                        </Button>
-                        
-                        {parseFloat(walletBalance) < totalEthPrice && (
-                          <div className="text-sm text-red-600 bg-red-50 p-3 rounded">
-                            Insufficient ETH balance for this purchase.
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </TabsContent>
-                </Tabs>
-              </div>
-            )}
-          </div>
-        </div>
+        )}
       </DialogContent>
     </Dialog>
   );

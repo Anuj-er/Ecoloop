@@ -5,60 +5,31 @@ export interface MarketplaceItem {
   description: string;
   price: number;
   currency: string;
+  quantity: number;
   materialType: string;
   condition: string;
-  quantity: number;
   pinCode: string;
-  images: Array<{
+  seller: {
+    _id: string;
+    firstName: string;
+    lastName: string;
+    avatarUrl?: string;
+    username?: string;
+  };
+  images: {
     url: string;
     public_id: string;
     width?: number;
     height?: number;
-    format?: string;
     aiAnalysis?: {
-      label: string;
-      confidence: number;
-      status: string;
-      qualityScore?: number;
+      label?: string;
+      confidence?: number;
+      status?: string;
     };
-  }>;
-  seller: {
-    _id: string;
-    username: string;
-    firstName: string;
-    lastName: string;
-    avatar?: string;
-    userType: string;
-    bio?: string;
-    location?: string;
-    organization?: {
-      name?: string;
-      website?: string;
-      industry?: string;
-      size?: string;
-    };
-  };
-  tags: string[];
-  category: string;
-  views: number;
-  interestedBuyers: Array<{
-    buyer: {
-      _id: string;
-      username: string;
-      firstName: string;
-      lastName: string;
-      avatar?: string;
-    };
-    message: string;
-    contactInfo?: {
-      phone?: string;
-      email?: string;
-    };
-    createdAt: string;
-  }>;
-  status: string;
-  createdAt: string;
-  timeAgo?: string;
+  }[];
+  status: 'active' | 'sold' | 'inactive' | 'pending_review' | 'rejected';
+  category?: string;
+  tags?: string[];
   dimensions?: {
     length?: number;
     width?: number;
@@ -66,9 +37,18 @@ export interface MarketplaceItem {
     weight?: number;
     unit?: string;
   };
-  reviewStatus?: string;
-  availableFrom?: string;
-  availableUntil?: string;
-  moderationNotes?: string;
-  rejectionReason?: string;
+  createdAt: string;
+  updatedAt: string;
+  views: number;
+  paymentPreferences?: {
+    acceptsFiat: boolean;
+    acceptsCrypto: boolean;
+    cryptoAddress?: string;
+    escrowEnabled?: boolean;
+  };
+}
+
+export interface CartItem {
+  item: MarketplaceItem;
+  quantity: number;
 }

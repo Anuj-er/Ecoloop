@@ -41,6 +41,24 @@ const marketplaceItemSchema = new mongoose.Schema({
     default: 'INR',
     enum: ['INR', 'USD', 'EUR', 'GBP']
   },
+  paymentPreferences: {
+    acceptsFiat: {
+      type: Boolean,
+      default: true
+    },
+    acceptsCrypto: {
+      type: Boolean,
+      default: false
+    },
+    cryptoAddress: {
+      type: String,
+      default: null
+    },
+    escrowEnabled: {
+      type: Boolean,
+      default: true
+    }
+  },
   condition: {
     type: String,
     required: [true, 'Item condition is required'],
