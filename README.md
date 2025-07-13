@@ -150,6 +150,11 @@ Ecoloop/
 
 **Team 404 Name Not Found** | Chitkara University
 
+
+- **[@anuj-er](https://github.com/anuj-er)** 
+- **[@anushi13prsnl](https://github.com/anushi13prsnl)** 
+- **[@akankshamishra2](https://github.com/akankshamishra2)** 
+
 Built with ❤️ for a sustainable future
 
 ## 📄 **License**
@@ -161,6 +166,6 @@ MIT License - feel free to use this project for learning and building your own s
 ### 🌍 **Join the Movement**
 Every transaction on EcoLoop AI contributes to a more sustainable future. Start your eco-journey today!
 
-**Live Demo**: [Coming Soon]  
-**Documentation**: [Wiki](https://github.com/AkankshaMishra2/Ecoloop/wiki)  
-**Issues**: [Bug Reports](https://github.com/AkankshaMishra2/Ecoloop/issues)
+**📹 Live Demo**: [Watch on YouTube](https://youtu.be/zQkFUziNMN0?si=__2dLU80eUUcKG0D)  
+**📚 Documentation**: [Wiki](https://github.com/AkankshaMishra2/Ecoloop/wiki)  
+**🐛 Issues**: [Bug Reports](https://github.com/AkankshaMishra2/Ecoloop/issues)
