@@ -58,7 +58,7 @@ CLOUDINARY_API_SECRET=your_api_secret
 ```bash
 # Database
 MONGODB_URI=mongodb://localhost:27017/ecoloop
-# OR MongoDB Atlas: mongodb+srv://user:pass@cluster.mongodb.net/ecoloop
+# OR MongoDB Atlas: mongodb+srv://USERNAME:PASSWORD@your-cluster.mongodb.net/ecoloop
 
 # Authentication
 JWT_SECRET=your_super_secret_jwt_key_here
