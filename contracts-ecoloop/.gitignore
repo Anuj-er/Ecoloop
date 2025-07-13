@@ -1,0 +1,21 @@
+# Hardhat files
+cache/
+artifacts/
+
+# Dependencies
+node_modules/
+
+# Deployment info
+deployment-info.json
+
+# Logs
+*.log
+
+# Environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+!.env.example
