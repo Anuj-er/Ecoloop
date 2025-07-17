@@ -1,6 +1,9 @@
 import User from '../models/User.js';
 import Post from '../models/Post.js';
 import Connection from '../models/Connection.js';
+import Payment from '../models/Payment.js';
+import MarketplaceItem from '../models/MarketplaceItem.js';
+import CO2_SAVINGS_PER_KG from '../utils/co2Savings.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 
 // @desc    Get all users (with pagination and filters)
@@ -364,5 +367,92 @@ export const getRecommendedUsers = asyncHandler(async (req, res) => {
     success: true,
     count: recommendedUsers.length,
     data: recommendedUsers
+  });
+});
+
+// @desc    Get user transactions with CO2 data
+// @route   GET /api/users/transactions
+// @access  Private
+export const getUserTransactions = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  const page = parseInt(req.query.page, 10) || 1;
+  const limit = parseInt(req.query.limit, 10) || 10;
+  const startIndex = (page - 1) * limit;
+
+  // Get user's completed payments
+  const payments = await Payment.find({
+    buyerId: userId,
+    status: 'completed'
+  })
+  .populate('itemId', 'title materialType')
+  .populate('items.itemId', 'title materialType')
+  .sort({ completedAt: -1 })
+  .skip(startIndex)
+  .limit(limit);
+
+  const totalPayments = await Payment.countDocuments({
+    buyerId: userId,
+    status: 'completed'
+  });
+
+  // Format transactions with CO2 data
+  const transactionsWithCO2 = payments.map(payment => {
+    let co2Saved = 0;
+    let itemDetails = [];
+
+    // Use stored CO2 data if available, otherwise calculate
+    if (payment.co2Impact && payment.co2Impact.totalCO2Saved) {
+      co2Saved = payment.co2Impact.totalCO2Saved;
+      itemDetails = payment.co2Impact.items.map(item => ({
+        title: `${item.materialType.charAt(0).toUpperCase() + item.materialType.slice(1)} Material`,
+        materialType: item.materialType,
+        quantity: item.quantity,
+        co2Saved: item.co2Saved
+      }));
+    } else {
+      // Fallback to calculation if CO2 data not stored
+      if (payment.multiItem && payment.items && payment.items.length > 0) {
+        payment.items.forEach(paymentItem => {
+          if (paymentItem.itemId) {
+            const co2PerKg = CO2_SAVINGS_PER_KG[paymentItem.itemId.materialType] || CO2_SAVINGS_PER_KG['other'];
+            const itemCO2 = co2PerKg * paymentItem.quantity;
+            co2Saved += itemCO2;
+            itemDetails.push({
+              title: paymentItem.itemId.title,
+              materialType: paymentItem.itemId.materialType,
+              quantity: paymentItem.quantity,
+              co2Saved: itemCO2
+            });
+          }
+        });
+      } else if (payment.itemId) {
+        const co2PerKg = CO2_SAVINGS_PER_KG[payment.itemId.materialType] || CO2_SAVINGS_PER_KG['other'];
+        co2Saved = co2PerKg * payment.quantity;
+        itemDetails.push({
+          title: payment.itemId.title,
+          materialType: payment.itemId.materialType,
+          quantity: payment.quantity,
+          co2Saved: co2Saved
+        });
+      }
+    }
+
+    return {
+      _id: payment._id,
+      amount: payment.amount,
+      currency: payment.currency,
+      completedAt: payment.completedAt,
+      co2Saved: parseFloat(co2Saved.toFixed(2)),
+      items: itemDetails
+    };
+  });
+
+  res.json({
+    success: true,
+    count: transactionsWithCO2.length,
+    total: totalPayments,
+    page,
+    pages: Math.ceil(totalPayments / limit),
+    data: transactionsWithCO2
   });
 }); 

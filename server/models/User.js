@@ -50,6 +50,11 @@ const userSchema = new mongoose.Schema({
     enum: ['individual', 'organization'],
     default: 'individual'
   },
+  role: {
+    type: String,
+    enum: ['user', 'admin'],
+    default: 'user'
+  },
   organization: {
     name: String,
     website: String,
@@ -78,6 +83,10 @@ const userSchema = new mongoose.Schema({
       default: 0
     }
   },
+  totalCO2Saved: {
+    type: Number,
+    default: 0
+  },
   interests: [{
     type: String,
     enum: ['recycling', 'renewable-energy', 'sustainable-fashion', 'zero-waste', 'green-tech', 'organic-farming', 'eco-tourism', 'clean-water']
@@ -86,6 +95,10 @@ const userSchema = new mongoose.Schema({
     type: String
   }],
   isVerified: {
+    type: Boolean,
+    default: false
+  },
+  isEmailVerified: {
     type: Boolean,
     default: false
   },

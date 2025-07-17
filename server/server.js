@@ -14,6 +14,9 @@ import postRoutes from './routes/post.js';
 import connectionRoutes from './routes/connection.js';
 import notificationRoutes from './routes/notifications.js';
 import uploadRoutes from './routes/upload.js';
+import adminRoutes from './routes/admin.js';
+import marketplaceRoutes from './routes/marketplace.js';
+import paymentRoutes from './routes/payment.js';
 
 dotenv.config();
 
@@ -49,7 +52,9 @@ app.get('/', (req, res) => {
       posts: '/api/posts',
       connections: '/api/connections',
       notifications: '/api/notifications',
-      upload: '/api/upload'
+      upload: '/api/upload',
+      marketplace: '/api/marketplace',
+      payments: '/api/payments'
     },
     status: 'Server is running!'
   });
@@ -67,10 +72,13 @@ app.get('/health', (req, res) => {
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/api/posts', postRoutes);
 app.use('/api/connections', connectionRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/upload', uploadRoutes);
+app.use('/api/marketplace', marketplaceRoutes);
+app.use('/api/payments', paymentRoutes);
 
 // Not found and error handlers
 app.use(notFound);
@@ -79,4 +87,4 @@ app.use(errorHandler);
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
-}); 
+});

@@ -8,7 +8,8 @@ import {
   getFollowers,
   getFollowing,
   getUserMetrics,
-  getRecommendedUsers
+  getRecommendedUsers,
+  getUserTransactions
 } from '../controllers/userController.js';
 import { protect } from '../middleware/auth.js';
 import User from '../models/User.js';
@@ -50,6 +51,7 @@ router.use(protect);
 router.get('/', getUsers);
 router.get('/search', searchUsers);
 router.get('/recommended', getRecommendedUsers);
+router.get('/transactions', getUserTransactions);
 router.get('/:id', getUser);
 router.get('/:id/followers', getFollowers);
 router.get('/:id/following', getFollowing);

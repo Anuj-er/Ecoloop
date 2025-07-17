@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { notificationsAPI } from '@/lib/api';
-import { useAuth } from '@/contexts/AuthContext';
+import { useNotifications } from '@/contexts/NotificationContext';
 import { 
   UserPlus, 
   Handshake, 
@@ -18,14 +18,28 @@ interface NotificationToastProps {
 
 export const NotificationToast = ({ onNotificationReceived }: NotificationToastProps) => {
   const { toast } = useToast();
-  const { isAuthenticated } = useAuth();
+  const { lastNotificationId, refreshUnreadCount } = useNotifications();
 
   useEffect(() => {
-    if (!isAuthenticated) return;
+    let lastCheckedId = lastNotificationId;
+    let intervalId: NodeJS.Timeout;
+    let isPageVisible = true;
 
-    let lastNotificationId: string | null = null;
+    // Track page visibility to pause polling when user is away
+    const handleVisibilityChange = () => {
+      isPageVisible = !document.hidden;
+      if (isPageVisible) {
+        // Check immediately when page becomes visible
+        checkForNewNotifications();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     const checkForNewNotifications = async () => {
+      // Only poll if page is visible
+      if (!isPageVisible) return;
+      
       try {
         const response = await notificationsAPI.getNotifications({ limit: 1 });
         const notifications = response.data.data || [];
@@ -34,8 +48,8 @@ export const NotificationToast = ({ onNotificationReceived }: NotificationToastP
           const latestNotification = notifications[0];
           
           // Only show toast for new notifications
-          if (lastNotificationId !== latestNotification._id && !latestNotification.isRead) {
-            lastNotificationId = latestNotification._id;
+          if (lastCheckedId !== latestNotification._id && !latestNotification.isRead) {
+            lastCheckedId = latestNotification._id;
             
             const icon = getNotificationIcon(latestNotification.type);
             const action = getNotificationAction(latestNotification.type);
@@ -48,6 +62,8 @@ export const NotificationToast = ({ onNotificationReceived }: NotificationToastP
             });
             
             onNotificationReceived?.();
+            // Refresh unread count when new notification appears
+            refreshUnreadCount();
           }
         }
       } catch (error) {
@@ -55,14 +71,27 @@ export const NotificationToast = ({ onNotificationReceived }: NotificationToastP
       }
     };
 
-    // Check for new notifications every 10 seconds
-    const interval = setInterval(checkForNewNotifications, 10000);
+    // Optimized polling: Check every 2 minutes instead of 10 seconds
+    // Most notifications don't need immediate delivery
+    const startPolling = () => {
+      intervalId = setInterval(() => {
+        if (isPageVisible) {
+          checkForNewNotifications();
+        }
+      }, 120000); // Increased from 60s to 2 minutes
+    };
     
-    // Initial check
-    checkForNewNotifications();
+    // Initial check only if we have a notification context ready
+    if (lastNotificationId !== null) {
+      checkForNewNotifications();
+    }
+    startPolling();
 
-    return () => clearInterval(interval);
-  }, [isAuthenticated, toast, onNotificationReceived]);
+    return () => {
+      clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [lastNotificationId, toast, onNotificationReceived, refreshUnreadCount]);
 
   const getNotificationIcon = (type: string) => {
     switch (type) {

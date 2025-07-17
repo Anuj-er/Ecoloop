@@ -6,6 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { FraudAlert } from "@/components/ui/fraud-alert";
 import { CreatePostModal } from "./CreatePostModal";
 import { useAuth } from "@/contexts/AuthContext";
 import { postsAPI } from "@/lib/api";
@@ -25,7 +26,8 @@ import {
   Eye,
   Trash2,
   Send,
-  X
+  X,
+  ShieldAlert
 } from "lucide-react";
 
 export const Feed = () => {
@@ -421,6 +423,23 @@ export const Feed = () => {
 
                   {/* Content */}
                   <p className="text-gray-800 leading-relaxed">{post.content}</p>
+                  
+                  {/* Fraud Detection Alert */}
+                  {post.fraudAnalysis && post.fraudAnalysis.fraudScore > 40 && (
+                    <div className="my-3 animate-pulse-slow">
+                      <FraudAlert 
+                        fraudScore={post.fraudAnalysis.fraudScore} 
+                        fraudFlags={post.fraudAnalysis.fraudFlags}
+                        severity={post.fraudAnalysis.fraudScore > 70 ? 'high' : 'medium'}
+                        compact={post.fraudAnalysis.fraudScore < 60}
+                      />
+                      {post.fraudAnalysis.fraudScore > 70 && (
+                        <p className="text-xs text-red-600 mt-1 text-center">
+                          This post has been flagged for review by moderators.
+                        </p>
+                      )}
+                    </div>
+                  )}
 
                   {/* Media */}
                   {post.media && post.media.length > 0 && (

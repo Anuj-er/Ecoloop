@@ -33,6 +33,13 @@ export const createPost = asyncHandler(async (req, res) => {
     });
   }
 
+  // Get fraud analysis from middleware or run it if not available
+  let fraudAnalysis = req.fraudAnalysis;
+  if (!fraudAnalysis) {
+    const { detectPostFraud } = await import('../utils/fraudDetection.js');
+    fraudAnalysis = await detectPostFraud(req.body, req.user._id);
+  }
+
   // Media should already be uploaded via upload API
   console.log('Creating post with media:', media);
   const post = await Post.create({
@@ -47,6 +54,12 @@ export const createPost = asyncHandler(async (req, res) => {
       wasteReduced: 0,
       energySaved: 0,
       peopleReached: 0
+    },
+    status: fraudAnalysis.status,
+    fraudAnalysis: {
+      fraudScore: fraudAnalysis.fraudProbability * 100,
+      fraudFlags: fraudAnalysis.fraudFlags,
+      reviewStatus: 'pending'
     }
   });
 

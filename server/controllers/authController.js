@@ -95,6 +95,7 @@ export const login = asyncHandler(async (req, res) => {
       firstName: user.firstName,
       lastName: user.lastName,
       userType: user.userType,
+      role: user.role,
       organization: user.organization,
       avatar: user.avatar,
       bio: user.bio,
@@ -103,6 +104,7 @@ export const login = asyncHandler(async (req, res) => {
       skills: user.skills,
       sustainabilityMetrics: user.sustainabilityMetrics,
       isVerified: user.isVerified,
+      isEmailVerified: user.isEmailVerified,
       token: generateToken(user._id)
     }
   });

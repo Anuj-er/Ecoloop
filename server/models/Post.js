@@ -91,6 +91,25 @@ const postSchema = new mongoose.Schema({
     type: String,
     enum: ['active', 'archived', 'flagged'],
     default: 'active'
+  },
+  fraudAnalysis: {
+    fraudScore: {
+      type: Number,
+      default: 0
+    },
+    fraudFlags: [{
+      type: String
+    }],
+    reviewStatus: {
+      type: String,
+      enum: ['pending', 'reviewed', 'cleared'],
+      default: 'pending'
+    },
+    reviewedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    reviewedAt: Date
   }
 }, {
   timestamps: true

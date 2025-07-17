@@ -28,11 +28,19 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      // Token expired or invalid
+    console.log('API interceptor caught error:', error);
+    
+    // Only redirect if not already on login page to avoid redirect loops
+    if (error.response?.status === 401 && 
+        !window.location.pathname.includes('login') && 
+        !window.location.pathname.includes('register')) {
+      console.log('Unauthorized access detected - clearing auth state');
+      // Token expired or invalid - don't redirect automatically
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      window.location.href = '/';
+      
+      // Don't redirect automatically, let components handle this
+      // window.location.href = '/';
     }
     return Promise.reject(error);
   }
@@ -85,6 +93,7 @@ export const usersAPI = {
   getFollowing: (id: string) => api.get(`/users/${id}/following`),
   getUserMetrics: (id: string) => api.get(`/users/${id}/metrics`),
   getRecommendedUsers: () => api.get('/users/recommended'),
+  getUserTransactions: (params?: any) => api.get('/users/transactions', { params }),
 };
 
 // Posts API
@@ -122,4 +131,62 @@ export const notificationsAPI = {
   deleteAllNotifications: (params?: any) => api.delete('/notifications', { params }),
 };
 
-export default api; 
+// Admin API
+export const adminAPI = {
+  getFlaggedPosts: (params?: any) => api.get('/admin/flagged-posts', { params }),
+  reviewFlaggedPost: (id: string, decision: 'approve' | 'reject') => 
+    api.put(`/admin/flagged-posts/${id}/review`, { decision }),
+  getFraudStats: () => api.get('/admin/fraud-stats'),
+};
+
+// Payment API
+export const paymentAPI = {
+  // Create Stripe payment intent
+  createPaymentIntent: (data: { 
+    itemId?: string; 
+    quantity?: number;
+    items?: Array<{
+      itemId: string;
+      quantity: number;
+    }>;
+    shippingInfo?: {
+      fullName: string;
+      addressLine1: string;
+      addressLine2?: string;
+      city: string;
+      state: string;
+      postalCode: string;
+      country: string;
+      phone: string;
+      email: string;
+    }
+  }) => api.post('/payments/create-payment-intent', data),
+  
+  // Verify Stripe payment
+  verifyPayment: (data: {
+    paymentIntentId: string;
+    paymentId: string;
+  }) => api.post('/payments/verify', data),
+  
+  // Process crypto payment
+  processCryptoPayment: (data: {
+    itemId: string;
+    quantity: number;
+    transactionHash: string;
+    walletAddress: string;
+  }) => api.post('/payments/crypto', data),
+  
+  // Confirm delivery
+  confirmDelivery: (data: { paymentId: string }) =>
+    api.post('/payments/confirm-delivery', data),
+  
+  // Get payment history
+  getPaymentHistory: (type?: 'purchases' | 'sales') =>
+    api.get(`/payments/history${type ? `?type=${type}` : ''}`),
+  
+  // Get payment details
+  getPaymentDetails: (paymentId: string) =>
+    api.get(`/payments/${paymentId}`)
+};
+
+export default api;

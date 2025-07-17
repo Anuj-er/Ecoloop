@@ -4,10 +4,11 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Textarea } from "@/components/ui/textarea";
-import { MapPin, Phone, Mail, Calendar, Star, Package, Users, Handshake, Edit, Settings } from "lucide-react";
+import { MapPin, Phone, Mail, Calendar, Star, Package, Users, Handshake, Edit, Settings, ShoppingCart } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProfileCompletionModal } from "./ProfileCompletionModal";
 import { CreatePostModal } from "./CreatePostModal";
+import { ImpactCard } from "./ImpactCard";
 import { useAuth } from "@/contexts/AuthContext";
 import { usersAPI, postsAPI, connectionsAPI } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -26,9 +27,11 @@ export const Profile = () => {
   const [userPosts, setUserPosts] = useState([]);
   const [userConnections, setUserConnections] = useState([]);
   const [userMetrics, setUserMetrics] = useState(null);
+  const [userTransactions, setUserTransactions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [commentInputs, setCommentInputs] = useState<{ [key: string]: string }>({});
   const [showComments, setShowComments] = useState<{ [key: string]: boolean }>({});
+  const [hasCheckedProfile, setHasCheckedProfile] = useState(false);
 
   // Check if profile is complete
   const isProfileComplete = user && 
@@ -38,14 +41,11 @@ export const Profile = () => {
     user.skills?.length > 0;
 
   useEffect(() => {
-    if (user) {
+    if (user && !hasCheckedProfile) {
       loadUserData();
-      // Show completion modal if profile is incomplete
-      if (!isProfileComplete) {
-        setShowCompletionModal(true);
-      }
+      setHasCheckedProfile(true);
     }
-  }, [user, isProfileComplete]);
+  }, [user]);
 
   const loadUserData = async () => {
     if (!user) return;
@@ -63,6 +63,10 @@ export const Profile = () => {
       // Load user metrics
       const metricsResponse = await usersAPI.getUserMetrics(user._id);
       setUserMetrics(metricsResponse.data.data);
+
+      // Load user transactions
+      const transactionsResponse = await usersAPI.getUserTransactions({ limit: 5 });
+      setUserTransactions(transactionsResponse.data.data);
 
     } catch (error) {
       console.error('Error loading user data:', error);
@@ -314,17 +318,35 @@ export const Profile = () => {
                   </div>
                 </div>
               </div>
-              <div className="flex space-x-2">
-                <Button 
-                  variant="outline" 
-                  onClick={() => setShowEditModal(true)}
-                >
-                  <Edit className="w-4 h-4 mr-2" />
-                  Edit Profile
-                </Button>
-                <Button variant="outline">
-                  <Settings className="w-4 h-4" />
-                </Button>
+              <div className="flex flex-col space-y-2">
+                <div className="flex space-x-2">
+                  <Button 
+                    variant="outline" 
+                    onClick={() => setShowEditModal(true)}
+                  >
+                    <Edit className="w-4 h-4 mr-2" />
+                    Edit Profile
+                  </Button>
+                  <Button variant="outline">
+                    <Settings className="w-4 h-4" />
+                  </Button>
+                </div>
+                <div className="flex space-x-2">
+                  <Button 
+                    variant="default"
+                    onClick={() => window.location.href = '/purchases'}
+                  >
+                    <Package className="w-4 h-4 mr-2" />
+                    My Purchases
+                  </Button>
+                  <Button 
+                    variant="outline"
+                    onClick={() => window.location.href = '/marketplace'}
+                  >
+                    <ShoppingCart className="w-4 h-4 mr-2" />
+                    Marketplace
+                  </Button>
+                </div>
               </div>
             </div>
 
@@ -416,6 +438,12 @@ export const Profile = () => {
               </div>
             </CardContent>
           </Card>
+        </div>
+
+        {/* Achievements / Impact Card Section */}
+        <div className="mb-8">
+          <h2 className="text-2xl font-bold mb-4">My Achievements</h2>
+          
         </div>
 
         {/* Main Content Tabs */}
@@ -655,32 +683,50 @@ export const Profile = () => {
             )}
           </TabsContent>
 
-          <TabsContent value="achievements" className="space-y-4">
+          <TabsContent value="achievements" className="space-y-6">
             <h2 className="text-xl font-semibold">Achievements</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <Card>
-                <CardContent className="p-4 text-center">
-                  <Award className="w-12 h-12 text-yellow-500 mx-auto mb-2" />
-                  <h3 className="font-medium">First Post</h3>
-                  <p className="text-sm text-gray-600">Created your first sustainability post</p>
-                </CardContent>
-              </Card>
-              
-              <Card>
-                <CardContent className="p-4 text-center">
-                  <Users className="w-12 h-12 text-blue-500 mx-auto mb-2" />
-                  <h3 className="font-medium">Network Builder</h3>
-                  <p className="text-sm text-gray-600">Connected with 5+ professionals</p>
-                </CardContent>
-              </Card>
-              
-              <Card>
-                <CardContent className="p-4 text-center">
-                  <TrendingUp className="w-12 h-12 text-green-500 mx-auto mb-2" />
-                  <h3 className="font-medium">Impact Maker</h3>
-                  <p className="text-sm text-gray-600">Reduced 1000+ kg of waste</p>
-                </CardContent>
-              </Card>
+            
+            {/* My Impact Card Section */}
+            <div className="mb-8">
+              <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                <Globe className="w-5 h-5 text-green-600" />
+                My Impact Card
+              </h3>
+              <ImpactCard
+                totalCO2Saved={user?.totalCO2Saved || 0}
+                latestTransaction={userTransactions[0]}
+                userName={user ? `${user.firstName} ${user.lastName}` : 'User'}
+              />
+            </div>
+
+            {/* Achievement Badges */}
+            <div>
+              <h3 className="text-lg font-semibold mb-4">Achievement Badges</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <Card>
+                  <CardContent className="p-4 text-center">
+                    <Award className="w-12 h-12 text-yellow-500 mx-auto mb-2" />
+                    <h3 className="font-medium">First Post</h3>
+                    <p className="text-sm text-gray-600">Created your first sustainability post</p>
+                  </CardContent>
+                </Card>
+                
+                <Card>
+                  <CardContent className="p-4 text-center">
+                    <Users className="w-12 h-12 text-blue-500 mx-auto mb-2" />
+                    <h3 className="font-medium">Network Builder</h3>
+                    <p className="text-sm text-gray-600">Connected with 5+ professionals</p>
+                  </CardContent>
+                </Card>
+                
+                <Card>
+                  <CardContent className="p-4 text-center">
+                    <TrendingUp className="w-12 h-12 text-green-500 mx-auto mb-2" />
+                    <h3 className="font-medium">Impact Maker</h3>
+                    <p className="text-sm text-gray-600">Reduced 1000+ kg of waste</p>
+                  </CardContent>
+                </Card>
+              </div>
             </div>
           </TabsContent>
         </Tabs>

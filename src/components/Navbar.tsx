@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -11,8 +11,9 @@ import {
   DropdownMenuTrigger 
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/contexts/AuthContext";
-import { User, Globe, BarChart3, MessageCircle, Users, Menu, Home, LogOut } from "lucide-react";
+import { User, Globe, BarChart3, MessageCircle, Users, Menu, Home, LogOut, ShieldAlert, ShoppingCart, Package } from "lucide-react";
 import { NotificationBell } from "./NotificationBell";
+import { MarketplaceItem } from "@/types/marketplace";
 
 interface NavbarProps {
   onSectionChange: (section: string) => void;
@@ -21,8 +22,9 @@ interface NavbarProps {
 
 export const Navbar = ({ onSectionChange, currentSection }: NavbarProps) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const { user, isAuthenticated, logout } = useAuth();
+  const { user, isAuthenticated, isAdmin, logout } = useAuth();
   const navigate = useNavigate();
+  const [cartCount, setCartCount] = useState(0);
 
   const languages = [
     { code: 'en', name: 'English', flag: '🇺🇸' },
@@ -32,6 +34,28 @@ export const Navbar = ({ onSectionChange, currentSection }: NavbarProps) => {
     { code: 'bn', name: 'বাংলা', flag: '🇧🇩' },
     { code: 'gu', name: 'ગુજરાતી', flag: '🇮🇳' }
   ];
+
+  // Get user-specific cart key
+  const getCartKey = () => {
+    return user ? `cart_${user._id}` : 'cart_guest';
+  };
+
+  // Load cart count
+  useEffect(() => {
+    if (isAuthenticated) {
+      const savedCart = localStorage.getItem(getCartKey());
+      if (savedCart) {
+        try {
+          const items = JSON.parse(savedCart) as MarketplaceItem[];
+          setCartCount(items.length);
+        } catch (e) {
+          console.error('Failed to parse cart data', e);
+        }
+      } else {
+        setCartCount(0);
+      }
+    }
+  }, [isAuthenticated, user]);
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-sm border-b shadow-sm">
@@ -73,6 +97,33 @@ export const Navbar = ({ onSectionChange, currentSection }: NavbarProps) => {
               Connect
             </Button>
 
+            <Button
+              variant="ghost"
+              onClick={() => navigate('/marketplace')}
+              className="text-sm"
+            >
+              <ShoppingCart className="w-4 h-4 mr-2" />
+              Marketplace
+            </Button>
+
+            {isAuthenticated && (
+              <>
+                <Button
+                  variant="ghost"
+                  onClick={() => navigate('/cart')}
+                  className="text-sm relative"
+                >
+                  <ShoppingCart className="w-4 h-4 mr-2" />
+                  Cart
+                  {cartCount > 0 && (
+                    <Badge className="absolute -top-2 -right-2 bg-red-500 text-white text-xs w-5 h-5 flex items-center justify-center p-0 rounded-full">
+                      {cartCount}
+                    </Badge>
+                  )}
+                </Button>
+              </>
+            )}
+
             {/* <Button
               variant={currentSection === 'impact' ? 'default' : 'ghost'}
               onClick={() => onSectionChange('impact')}
@@ -109,42 +160,69 @@ export const Navbar = ({ onSectionChange, currentSection }: NavbarProps) => {
               </DropdownMenuContent>
             </DropdownMenu>
 
-            {/* Notification Bell */}
-            {isAuthenticated && (
-              <NotificationBell className="mr-2" />
-            )}
-
             {/* Authentication Buttons */}
             {isAuthenticated ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className="flex items-center space-x-2">
-                    <Avatar className="w-8 h-8">
-                      <AvatarImage src={user?.avatar} />
-                      <AvatarFallback>
-                        {user?.firstName?.charAt(0) || user?.username?.charAt(0) || "U"}
-                      </AvatarFallback>
-                    </Avatar>
-                    <span className="text-sm">{user?.firstName || user?.username || "User"}</span>
+              <div className="flex items-center space-x-4">
+                <NotificationBell />
+                {isAdmin && (
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="flex items-center space-x-2 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-800"
+                    onClick={() => navigate('/admin/fraud-detection')}
+                  >
+                    <ShieldAlert className="w-4 h-4" />
+                    <span>Admin Dashboard</span>
                   </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent>
-                  <DropdownMenuItem onClick={() => navigate('/profile')}>
-                    <User className="w-4 h-4 mr-2" />
-                    View Profile
-                  </DropdownMenuItem>
-                  <DropdownMenuItem>Settings</DropdownMenuItem>
-                  <DropdownMenuItem onClick={logout}>
-                    <LogOut className="w-4 h-4 mr-2" />
-                    Logout
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                )}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" className="flex items-center space-x-2">
+                      <Avatar className="w-8 h-8">
+                        <AvatarImage src={user?.avatar} />
+                        <AvatarFallback className={isAdmin ? "bg-blue-100 text-blue-800" : "bg-green-100 text-green-800"}>
+                          {user?.firstName?.charAt(0) || user?.username?.charAt(0) || "U"}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="text-sm">{user?.firstName || user?.username || "User"}</span>
+                      {isAdmin && <Badge className="ml-1 bg-blue-100 text-blue-700 text-xs">Admin</Badge>}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuItem onClick={() => navigate('/profile')}>
+                      <User className="w-4 h-4 mr-2" />
+                      View Profile
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => navigate('/purchases')}>
+                      <Package className="w-4 h-4 mr-2" />
+                      My Purchases
+                    </DropdownMenuItem>
+                    {/* Show fraud detection dashboard for admin users */}
+                    {isAdmin && (
+                      <DropdownMenuItem onClick={() => navigate('/admin/fraud-detection')}>
+                        <ShieldAlert className="w-4 h-4 mr-2" />
+                        Fraud Detection Dashboard
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem>Settings</DropdownMenuItem>
+                    <DropdownMenuItem onClick={logout}>
+                      <LogOut className="w-4 h-4 mr-2" />
+                      Logout
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             ) : (
               <div className="flex items-center space-x-2">
                 <Link to="/login">
                   <Button variant="ghost" size="sm">
                     Login
+                  </Button>
+                </Link>
+                <Link to="/admin/login">
+                  <Button variant="outline" size="sm" className="flex items-center">
+                    <ShieldAlert className="w-4 h-4 mr-1" />
+                    Admin
                   </Button>
                 </Link>
                 <Link to="/register">
