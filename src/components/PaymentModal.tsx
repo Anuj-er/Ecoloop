@@ -17,7 +17,6 @@ import { loadStripe } from '@stripe/stripe-js';
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ethers } from 'ethers';
-import { EcoLoopImpactCard } from './EcoLoopImpactCard';
 import { usersAPI } from '@/lib/api';
 import Confetti from 'react-confetti';
 import { CO2SavingsPopup } from './CO2SavingsPopup';

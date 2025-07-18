@@ -1,41 +1,142 @@
+/**
+ * EcoLoop Payment Service
+ * 
+ * This service handles cryptocurrency payments through the deployed EcoLoop Escrow contract.
+ * 
+ * Features:
+ * - Crypto payments with MetaMask integration
+ * - Escrow functionality for secure transactions
+ * - Emergency refunds within 7 days
+ * - Balance withdrawal for sellers
+ * - Support for Ethereum on Sepolia testnet
+ * 
+ * Contract Address: 0xf8692A160805884D1e30a7c7C8da971cb7772696 (Sepolia)
+ * 
+ * Fixed Issues:
+ * - Updated ABI to match deployed contract
+ * - Added missing contract functions (withdraw, emergencyRefund, getBalance)
+ * - Proper TypeScript types and error handling
+ * - Contract address validation and initialization
+ */
+
 import Web3 from 'web3';
 import { ethers } from 'ethers';
 
-// Smart contract ABI for a simple escrow contract
-const ESCROW_CONTRACT_ABI = [
+// Smart contract ABI for EcoLoop Escrow contract
+const ESCROW_CONTRACT_ABI: any[] = [
   {
+    "type": "event",
+    "name": "DeliveryConfirmed",
     "inputs": [
-      {"internalType": "address", "name": "_seller", "type": "address"},
-      {"internalType": "string", "name": "_itemId", "type": "string"}
-    ],
-    "name": "createEscrow",
-    "outputs": [],
-    "stateMutability": "payable",
-    "type": "function"
+      {"name": "itemId", "type": "string", "indexed": false},
+      {"name": "buyer", "type": "address", "indexed": false}
+    ]
   },
   {
-    "inputs": [{"internalType": "string", "name": "_itemId", "type": "string"}],
-    "name": "confirmDelivery",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
+    "type": "event",
+    "name": "EscrowCompleted",
+    "inputs": [
+      {"name": "itemId", "type": "string", "indexed": false},
+      {"name": "seller", "type": "address", "indexed": false},
+      {"name": "amount", "type": "uint256", "indexed": false}
+    ]
   },
   {
-    "inputs": [{"internalType": "string", "name": "_itemId", "type": "string"}],
-    "name": "getEscrowDetails",
-    "outputs": [
-      {"internalType": "address", "name": "buyer", "type": "address"},
-      {"internalType": "address", "name": "seller", "type": "address"},
-      {"internalType": "uint256", "name": "amount", "type": "uint256"},
-      {"internalType": "bool", "name": "isDelivered", "type": "bool"}
-    ],
+    "type": "event",
+    "name": "EscrowCreated",
+    "inputs": [
+      {"name": "itemId", "type": "string", "indexed": false},
+      {"name": "buyer", "type": "address", "indexed": false},
+      {"name": "seller", "type": "address", "indexed": false},
+      {"name": "amount", "type": "uint256", "indexed": false}
+    ]
+  },
+  {
+    "type": "event",
+    "name": "FundsWithdrawn",
+    "inputs": [
+      {"name": "user", "type": "address", "indexed": false},
+      {"name": "amount", "type": "uint256", "indexed": false}
+    ]
+  },
+  {
+    "type": "function",
+    "name": "balances",
     "stateMutability": "view",
-    "type": "function"
+    "inputs": [{"name": "", "type": "address"}],
+    "outputs": [{"name": "", "type": "uint256"}]
+  },
+  {
+    "type": "function",
+    "name": "confirmDelivery",
+    "stateMutability": "nonpayable",
+    "inputs": [{"name": "_itemId", "type": "string"}],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "createEscrow",
+    "stateMutability": "payable",
+    "inputs": [
+      {"name": "_seller", "type": "address"},
+      {"name": "_itemId", "type": "string"}
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "emergencyRefund",
+    "stateMutability": "nonpayable",
+    "inputs": [{"name": "_itemId", "type": "string"}],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "escrows",
+    "stateMutability": "view",
+    "inputs": [{"name": "", "type": "string"}],
+    "outputs": [
+      {"name": "buyer", "type": "address"},
+      {"name": "seller", "type": "address"},
+      {"name": "amount", "type": "uint256"},
+      {"name": "itemId", "type": "string"},
+      {"name": "isDelivered", "type": "bool"},
+      {"name": "isCompleted", "type": "bool"},
+      {"name": "createdAt", "type": "uint256"}
+    ]
+  },
+  {
+    "type": "function",
+    "name": "getBalance",
+    "stateMutability": "view",
+    "inputs": [{"name": "_user", "type": "address"}],
+    "outputs": [{"name": "", "type": "uint256"}]
+  },
+  {
+    "type": "function",
+    "name": "getEscrowDetails",
+    "stateMutability": "view",
+    "inputs": [{"name": "_itemId", "type": "string"}],
+    "outputs": [
+      {"name": "buyer", "type": "address"},
+      {"name": "seller", "type": "address"},
+      {"name": "amount", "type": "uint256"},
+      {"name": "isDelivered", "type": "bool"},
+      {"name": "isCompleted", "type": "bool"},
+      {"name": "createdAt", "type": "uint256"}
+    ]
+  },
+  {
+    "type": "function",
+    "name": "withdraw",
+    "stateMutability": "nonpayable",
+    "inputs": [],
+    "outputs": []
   }
 ];
 
-// Contract address (you'll need to deploy your own contract)
-const ESCROW_CONTRACT_ADDRESS = import.meta.env.VITE_ESCROW_CONTRACT_ADDRESS || null;
+// Contract address from deployment
+const ESCROW_CONTRACT_ADDRESS = import.meta.env.VITE_ESCROW_CONTRACT_ADDRESS || '0xf8692A160805884D1e30a7c7C8da971cb7772696';
 
 export interface PaymentMethod {
   type: 'crypto' | 'fiat';
@@ -70,6 +171,15 @@ export interface PaymentResult {
   error?: string;
 }
 
+export interface EscrowDetails {
+  buyer: string;
+  seller: string;
+  amount: string;
+  isDelivered: boolean;
+  isCompleted: boolean;
+  createdAt: string;
+}
+
 class PaymentService {
   private web3: Web3 | null = null;
   private escrowContract: any = null;
@@ -82,13 +192,14 @@ class PaymentService {
     if (typeof window !== 'undefined' && (window as any).ethereum) {
       this.web3 = new Web3((window as any).ethereum);
       
-      // Only initialize contract if we have a valid contract address
-      if (ESCROW_CONTRACT_ADDRESS && ESCROW_CONTRACT_ADDRESS !== '0x...' && ESCROW_CONTRACT_ADDRESS.length === 42) {
+      // Initialize contract with the deployed address
+      if (ESCROW_CONTRACT_ADDRESS && ESCROW_CONTRACT_ADDRESS.length === 42) {
         try {
           this.escrowContract = new this.web3.eth.Contract(
             ESCROW_CONTRACT_ABI,
             ESCROW_CONTRACT_ADDRESS
           );
+          console.log('Escrow contract initialized successfully at:', ESCROW_CONTRACT_ADDRESS);
         } catch (error) {
           console.warn('Failed to initialize escrow contract:', error);
         }
@@ -193,13 +304,89 @@ class PaymentService {
     }
   }
 
-  // Get escrow details
-  public async getEscrowDetails(itemId: string) {
+  // Get escrow details (updated to match deployed contract)
+  public async getEscrowDetails(itemId: string): Promise<EscrowDetails> {
     if (!this.escrowContract) {
       throw new Error('Contract not initialized');
     }
 
-    return await this.escrowContract.methods.getEscrowDetails(itemId).call();
+    const result = await this.escrowContract.methods.getEscrowDetails(itemId).call();
+    return {
+      buyer: result[0],
+      seller: result[1],
+      amount: result[2],
+      isDelivered: result[3],
+      isCompleted: result[4],
+      createdAt: result[5]
+    };
+  }
+
+  // Get user's available balance for withdrawal
+  public async getUserBalance(address: string): Promise<string> {
+    if (!this.web3 || !this.escrowContract) {
+      throw new Error('Web3 or contract not initialized');
+    }
+
+    const balance = await this.escrowContract.methods.getBalance(address).call();
+    return this.web3.utils.fromWei(balance, 'ether');
+  }
+
+  // Withdraw available balance
+  public async withdrawBalance(): Promise<PaymentResult> {
+    if (!this.web3 || !this.escrowContract) {
+      return { success: false, error: 'Web3 not initialized' };
+    }
+
+    try {
+      const accounts = await this.connectWallet();
+      const userAddress = accounts[0];
+
+      const transaction = await this.escrowContract.methods
+        .withdraw()
+        .send({
+          from: userAddress,
+          gas: 150000
+        });
+
+      return {
+        success: true,
+        transactionHash: transaction.transactionHash
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: 'Withdrawal failed: ' + (error as Error).message
+      };
+    }
+  }
+
+  // Emergency refund (within 7 days if not delivered)
+  public async emergencyRefund(itemId: string): Promise<PaymentResult> {
+    if (!this.web3 || !this.escrowContract) {
+      return { success: false, error: 'Web3 not initialized' };
+    }
+
+    try {
+      const accounts = await this.connectWallet();
+      const buyerAddress = accounts[0];
+
+      const transaction = await this.escrowContract.methods
+        .emergencyRefund(itemId)
+        .send({
+          from: buyerAddress,
+          gas: 200000
+        });
+
+      return {
+        success: true,
+        transactionHash: transaction.transactionHash
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: 'Emergency refund failed: ' + (error as Error).message
+      };
+    }
   }
 
   // Convert ETH to USD (simple mock - in production, use real exchange rates)
