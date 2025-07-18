@@ -456,5 +456,6 @@ def analyze_marketplace():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
+    debug_mode = os.environ.get('DEBUG', 'False').lower() == 'true'
     logger.info(f"Starting EcoLoop Marketplace Image Analysis Service on port {port}")
-    app.run(host='0.0.0.0', port=port, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=debug_mode)
