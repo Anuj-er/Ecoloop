@@ -56,7 +56,8 @@ export const createMarketplaceItem = asyncHandler(async (req, res) => {
     tags,
     category,
     dimensions,
-    availableUntil
+    availableUntil,
+    paymentPreferences
   } = req.body;
 
   // Validate required fields
@@ -354,6 +355,12 @@ export const createMarketplaceItem = asyncHandler(async (req, res) => {
     category,
     dimensions,
     availableUntil,
+    paymentPreferences: paymentPreferences || {
+      acceptsFiat: true,
+      acceptsCrypto: false,
+      cryptoAddress: null,
+      escrowEnabled: true
+    },
     status: itemStatus,
     reviewStatus
   });
@@ -532,7 +539,7 @@ export const updateMarketplaceItem = asyncHandler(async (req, res) => {
   }
 
   // Update allowed fields
-  const allowedUpdates = ['title', 'description', 'quantity', 'price', 'condition', 'tags', 'status', 'availableUntil'];
+  const allowedUpdates = ['title', 'description', 'quantity', 'price', 'condition', 'tags', 'status', 'availableUntil', 'paymentPreferences'];
   const updates = {};
 
   allowedUpdates.forEach(field => {
