@@ -15,6 +15,7 @@ import api from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { useNavigate } from 'react-router-dom';
+import { ethers } from 'ethers';
 
 interface Purchase {
   _id: string;
@@ -67,6 +68,10 @@ interface Purchase {
   completedAt?: string;
   createdAt: string;
   failureReason?: string;
+  escrowDetails?: {
+    escrowId: string;
+    contractAddress: string;
+  };
 }
 
 interface PurchaseStats {
@@ -539,7 +544,7 @@ const PurchaseDetailsModal = ({
                           if (response.data.success) {
                             toast.success('Payment released to the seller');
                             // Update local state or refetch purchases
-                            fetchPurchases();
+                            window.location.reload();
                           } else {
                             toast.error(response.data.message || 'Failed to confirm delivery');
                           }
@@ -589,6 +594,21 @@ export const Purchases = () => {
       if (response.data.success) {
         const purchaseData = response.data.data || [];
         setPurchases(purchaseData);
+        
+        // Debug escrow purchases
+        const escrowPurchases = purchaseData.filter((purchase: Purchase) => 
+          purchase.status === 'escrow_held' || purchase.status === 'escrow_released'
+        );
+        
+        if (escrowPurchases.length > 0) {
+          console.log(`🔐 Found ${escrowPurchases.length} escrow purchases:`);
+          escrowPurchases.forEach((purchase: Purchase, index: number) => {
+            console.log(`- Escrow Purchase ${index + 1}:`);
+            console.log(`  ID: ${purchase._id}`);
+            console.log(`  Status: ${purchase.status}`);
+            console.log(`  Escrow Details:`, purchase.escrowDetails || 'None');
+          });
+        }
         
         // Calculate stats
         const stats = purchaseData.reduce((acc: PurchaseStats, purchase: Purchase) => {
@@ -1006,13 +1026,85 @@ export const Purchases = () => {
                                     if (confirm("Have you received the item? This will release the escrowed payment to the seller.")) {
                                       try {
                                         setLoading(true);
+                                        
+                                        // First, check if escrow details are available
+                                        console.log('Checking escrow details for payment:', purchase._id);
+                                        const checkResponse = await api.get(`/payments/escrow-details/${purchase._id}`);
+                                        
+                                        if (!checkResponse.data.success) {
+                                          console.error('Failed to get escrow details:', checkResponse.data);
+                                          toast.error(checkResponse.data.message || 'Failed to get escrow details');
+                                          setLoading(false);
+                                          return;
+                                        }
+                                        
+                                        const escrowDetails = checkResponse.data.escrowDetails;
+                                        const escrowId = escrowDetails.escrowId;
+                                        const contractAddress = escrowDetails.contractAddress;
+                                        
+                                        console.log('Escrow details found:');
+                                        console.log('- Escrow ID:', escrowId);
+                                        console.log('- Contract Address:', contractAddress);
+                                        
+                                        // Connect to wallet and confirm delivery on the blockchain
+                                        let transactionHash;
+                                        try {
+                                          if (window.ethereum) {
+                                            const provider = new ethers.providers.Web3Provider(window.ethereum);
+                                            const signer = provider.getSigner();
+                                            
+                                            // Contract ABI for confirmDelivery
+                                            const contractABI = [
+                                              {
+                                                "type": "function",
+                                                "name": "confirmDelivery",
+                                                "stateMutability": "nonpayable",
+                                                "inputs": [
+                                                  {"name": "_itemId", "type": "string"}
+                                                ],
+                                                "outputs": []
+                                              }
+                                            ];
+                                            
+                                            // Create contract instance
+                                            const contract = new ethers.Contract(
+                                              contractAddress,
+                                              contractABI,
+                                              signer
+                                            );
+                                            
+                                            console.log('Calling confirmDelivery with escrow ID:', escrowId);
+                                            
+                                            // Call confirmDelivery
+                                            const tx = await contract.confirmDelivery(escrowId);
+                                            console.log('Transaction sent:', tx.hash);
+                                            
+                                            // Wait for transaction to be mined
+                                            const receipt = await tx.wait();
+                                            transactionHash = receipt.transactionHash;
+                                            
+                                            console.log('Delivery confirmed on blockchain:', transactionHash);
+                                          } else {
+                                            console.log('MetaMask not installed, skipping blockchain confirmation');
+                                          }
+                                        } catch (error) {
+                                          console.error('Error confirming delivery on blockchain:', error);
+                                          toast.error('Failed to confirm delivery on blockchain. Please try again.');
+                                          setLoading(false);
+                                          return;
+                                        }
+                                        
+                                        // Now notify the backend
                                         const response = await api.post('/payments/confirm-delivery', {
-                                          paymentId: purchase._id
+                                          paymentId: purchase._id,
+                                          transactionHash, // Include the transaction hash if available
+                                          escrowId // Include the escrow ID explicitly
                                         });
                                         
                                         if (response.data.success) {
                                           toast.success('Delivery confirmed! Payment has been released to the seller.');
-                                          fetchPurchases();
+                                          // Refresh the purchases list
+                                          window.location.reload();
                                         } else {
                                           toast.error(response.data.message || 'Failed to confirm delivery');
                                         }

@@ -536,6 +536,16 @@ export const processCryptoPayment = async (req, res) => {
     const { itemId, quantity, transactionHash, walletAddress, useEscrow, escrowId } = req.body;
     const buyerId = req.user._id;
 
+    // Log payment request details
+    console.log('🔄 Processing crypto payment:');
+    console.log('- Item ID:', itemId);
+    console.log('- Transaction Hash:', transactionHash);
+    console.log('- Wallet Address:', walletAddress);
+    console.log('- Use Escrow:', useEscrow);
+    if (useEscrow) {
+      console.log('- Escrow ID:', escrowId);
+    }
+
     // Validate request data
     if (!itemId || !transactionHash || !walletAddress) {
       return res.status(400).json({
@@ -596,6 +606,7 @@ export const processCryptoPayment = async (req, res) => {
 
     // **BLOCKCHAIN VERIFICATION WITH DEV MODE BYPASS**
     let txReceipt = null;
+    let txData = null;
     
     // Check if we're in development mode or if transaction hash looks like a test
     const isDevelopment = process.env.NODE_ENV === 'development' || 
@@ -618,6 +629,7 @@ export const processCryptoPayment = async (req, res) => {
       const web3 = new Web3(process.env.SEPOLIA_RPC_URL || `https://eth-sepolia.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`);
       
       try {
+        // Get transaction receipt
         txReceipt = await web3.eth.getTransactionReceipt(transactionHash);
         
         if (!txReceipt || txReceipt.status !== true) {
@@ -626,6 +638,17 @@ export const processCryptoPayment = async (req, res) => {
             message: 'Invalid transaction or transaction failed'
           });
         }
+        
+        // Get full transaction data
+        txData = await web3.eth.getTransaction(transactionHash);
+        
+        console.log('Transaction data received:', {
+          hash: txData.hash,
+          to: txData.to,
+          from: txData.from,
+          value: web3.utils.fromWei(txData.value, 'ether'),
+          inputDataLength: txData.input.length
+        });
       } catch (error) {
         console.error('Error verifying transaction:', error);
         return res.status(500).json({
@@ -646,8 +669,64 @@ export const processCryptoPayment = async (req, res) => {
           });
         }
         
-        // TODO: Verify the escrow was created for this specific item and seller
-        // This would require decoding the transaction input data
+        // Verify the escrow was created for this specific item and seller
+        // Decode the transaction input data
+        try {
+          // Define the ABI for the createEscrow function
+          const createEscrowABI = [
+            {
+              "type": "function",
+              "name": "createEscrow",
+              "stateMutability": "payable",
+              "inputs": [
+                {"name": "_seller", "type": "address"},
+                {"name": "_itemId", "type": "string"}
+              ],
+              "outputs": []
+            }
+          ];
+          
+          // Create contract interface for decoding
+          const contractInterface = new web3.eth.Contract(createEscrowABI, escrowContractAddress);
+          
+          // Decode the input data
+          const decodedData = web3.eth.abi.decodeParameters(
+            ['address', 'string'],
+            '0x' + txData.input.slice(10) // Remove function selector (first 10 characters)
+          );
+          
+          const sellerAddress = decodedData[0];
+          const decodedEscrowId = decodedData[1];
+          
+          console.log('Decoded transaction data:', {
+            sellerAddress,
+            decodedEscrowId,
+            providedEscrowId: escrowId
+          });
+          
+          // Verify the seller address matches
+          if (sellerAddress.toLowerCase() !== item.paymentPreferences.cryptoAddress.toLowerCase()) {
+            return res.status(400).json({
+              success: false,
+              message: 'Transaction seller address does not match item seller'
+            });
+          }
+          
+          // Verify the escrow ID matches
+          if (decodedEscrowId !== escrowId) {
+            return res.status(400).json({
+              success: false,
+              message: 'Transaction escrow ID does not match provided escrow ID'
+            });
+          }
+          
+        } catch (error) {
+          console.error('Error decoding transaction input:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to verify escrow details in transaction'
+          });
+        }
       } else {
         // For direct payments, verify the transaction is to the seller's wallet
         if (!item.paymentPreferences?.cryptoAddress || 
@@ -691,6 +770,81 @@ export const processCryptoPayment = async (req, res) => {
     });
 
     await payment.save();
+
+    // If using escrow and not in development mode, try to listen for the EscrowCreated event
+    if (useEscrow && !isDevelopment) {
+      try {
+        const web3 = new Web3(process.env.SEPOLIA_RPC_URL || `https://eth-sepolia.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`);
+        
+        // Define the ABI for the EscrowCreated event
+        const escrowEventABI = [
+          {
+            "type": "event",
+            "name": "EscrowCreated",
+            "inputs": [
+              {"name": "itemId", "type": "string", "indexed": false},
+              {"name": "buyer", "type": "address", "indexed": false},
+              {"name": "seller", "type": "address", "indexed": false},
+              {"name": "amount", "type": "uint256", "indexed": false}
+            ]
+          }
+        ];
+        
+        // Create contract interface
+        const escrowContract = new web3.eth.Contract(escrowEventABI, process.env.ESCROW_CONTRACT_ADDRESS);
+        
+        // Get transaction receipt to find events
+        const receipt = await web3.eth.getTransactionReceipt(transactionHash);
+        
+        // Log events from receipt
+        if (receipt && receipt.logs) {
+          console.log(`📊 Found ${receipt.logs.length} log entries in transaction`);
+          
+          // Try to decode logs as EscrowCreated events
+          receipt.logs.forEach((log, index) => {
+            try {
+              // Check if this log is from our contract
+              if (log.address.toLowerCase() === process.env.ESCROW_CONTRACT_ADDRESS.toLowerCase()) {
+                console.log(`✅ Log ${index} is from our escrow contract`);
+                
+                // Try to decode as EscrowCreated event
+                const eventSignature = web3.utils.sha3('EscrowCreated(string,address,address,uint256)');
+                if (log.topics && log.topics[0] === eventSignature) {
+                  const decodedLog = web3.eth.abi.decodeLog(
+                    [
+                      { type: 'string', name: 'itemId' },
+                      { type: 'address', name: 'buyer' },
+                      { type: 'address', name: 'seller' },
+                      { type: 'uint256', name: 'amount' }
+                    ],
+                    log.data,
+                    log.topics.slice(1)
+                  );
+                  
+                  console.log('🎉 EscrowCreated event detected:');
+                  console.log('- Event itemId:', decodedLog.itemId);
+                  console.log('- Event buyer:', decodedLog.buyer);
+                  console.log('- Event seller:', decodedLog.seller);
+                  console.log('- Event amount:', web3.utils.fromWei(decodedLog.amount, 'ether'), 'ETH');
+                  
+                  // Verify escrow ID matches
+                  if (decodedLog.itemId === escrowId) {
+                    console.log('✅ Event escrowId matches provided escrowId');
+                  } else {
+                    console.log('⚠️ Event escrowId does not match provided escrowId');
+                  }
+                }
+              }
+            } catch (error) {
+              console.log(`Error decoding log ${index}:`, error.message);
+            }
+          });
+        }
+      } catch (error) {
+        console.log('Error listening for EscrowCreated event:', error.message);
+        // Don't fail the request if event listening fails
+      }
+    }
 
     // Update item quantity
     if (item.quantity >= quantity) {
@@ -770,8 +924,13 @@ export const processCryptoPayment = async (req, res) => {
 // Confirm delivery and release escrow
 export const confirmDelivery = async (req, res) => {
   try {
-    const { paymentId } = req.body;
+    const { paymentId, transactionHash, escrowId } = req.body;
     const buyerId = req.user._id;
+
+    console.log('🔄 Processing delivery confirmation:');
+    console.log('- Payment ID:', paymentId);
+    console.log('- Transaction Hash:', transactionHash);
+    console.log('- Escrow ID (from request):', escrowId);
 
     // Find payment
     const payment = await Payment.findById(paymentId);
@@ -781,6 +940,14 @@ export const confirmDelivery = async (req, res) => {
         message: 'Payment not found'
       });
     }
+
+    // Log payment details
+    console.log('- Payment found:', {
+      id: payment._id,
+      status: payment.status,
+      escrowId: payment.escrowDetails?.escrowId,
+      contractAddress: payment.escrowDetails?.contractAddress
+    });
 
     // Verify buyer
     if (payment.buyerId.toString() !== buyerId.toString()) {
@@ -798,11 +965,155 @@ export const confirmDelivery = async (req, res) => {
       });
     }
 
+    // Verify escrow details exist
+    if (!payment.escrowDetails || !payment.escrowDetails.escrowId) {
+      // If escrowId is provided in the request but not in the payment, update it
+      if (escrowId) {
+        console.log('⚠️ Escrow ID missing in payment but provided in request. Updating payment with escrow ID:', escrowId);
+        payment.escrowDetails = payment.escrowDetails || {};
+        payment.escrowDetails.escrowId = escrowId;
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: 'Escrow details not found for this payment'
+        });
+      }
+    }
+
+    // Use escrowId from request if provided, otherwise use the one from payment
+    const finalEscrowId = escrowId || payment.escrowDetails.escrowId;
+    console.log('- Using escrow ID:', finalEscrowId);
+
     // Handle different payment types
     if (payment.paymentMethod.type === 'crypto') {
       // For crypto payments, we need to verify the escrow release on the blockchain
       // This would typically be handled client-side with the user's wallet
       // But we still update our database records
+      
+      // If transaction hash is provided, verify it on the blockchain
+      if (transactionHash && process.env.NODE_ENV !== 'development') {
+        try {
+          const web3 = new Web3(process.env.SEPOLIA_RPC_URL || `https://eth-sepolia.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`);
+          
+          // Get transaction receipt
+          const txReceipt = await web3.eth.getTransactionReceipt(transactionHash);
+          
+          if (!txReceipt || txReceipt.status !== true) {
+            return res.status(400).json({
+              success: false,
+              message: 'Invalid transaction or transaction failed'
+            });
+          }
+          
+          // Verify transaction is to the escrow contract
+          if (txReceipt.to.toLowerCase() !== payment.escrowDetails.contractAddress.toLowerCase()) {
+            return res.status(400).json({
+              success: false,
+              message: 'Transaction is not to the escrow contract'
+            });
+          }
+          
+          // Try to decode the transaction input data
+          try {
+            // Get full transaction data
+            const txData = await web3.eth.getTransaction(transactionHash);
+            
+            // Define the ABI for the confirmDelivery function
+            const confirmDeliveryABI = [
+              {
+                "type": "function",
+                "name": "confirmDelivery",
+                "stateMutability": "nonpayable",
+                "inputs": [
+                  {"name": "_itemId", "type": "string"}
+                ],
+                "outputs": []
+              }
+            ];
+            
+            // Decode the input data
+            const decodedData = web3.eth.abi.decodeParameters(
+              ['string'],
+              '0x' + txData.input.slice(10) // Remove function selector (first 10 characters)
+            );
+            
+            const decodedEscrowId = decodedData[0];
+            
+            console.log('Decoded transaction data:', {
+              decodedEscrowId,
+              finalEscrowId
+            });
+            
+            // Verify the escrow ID matches
+            if (decodedEscrowId !== finalEscrowId) {
+              console.log('⚠️ Warning: Transaction escrow ID does not match payment escrow ID');
+              console.log('- Transaction escrow ID:', decodedEscrowId);
+              console.log('- Payment escrow ID:', finalEscrowId);
+              // We don't fail here, but log a warning
+            }
+            
+            // Look for DeliveryConfirmed event
+            if (txReceipt.logs) {
+              console.log(`📊 Found ${txReceipt.logs.length} log entries in transaction`);
+              
+              // Try to decode logs as DeliveryConfirmed events
+              let foundEvent = false;
+              txReceipt.logs.forEach((log, index) => {
+                try {
+                  // Check if this log is from our contract
+                  if (log.address.toLowerCase() === payment.escrowDetails.contractAddress.toLowerCase()) {
+                    console.log(`✅ Log ${index} is from our escrow contract`);
+                    
+                    // Try to decode as DeliveryConfirmed event
+                    const eventSignature = web3.utils.sha3('DeliveryConfirmed(string,address)');
+                    if (log.topics && log.topics[0] === eventSignature) {
+                      const decodedLog = web3.eth.abi.decodeLog(
+                        [
+                          { type: 'string', name: 'itemId' },
+                          { type: 'address', name: 'buyer' }
+                        ],
+                        log.data,
+                        log.topics.slice(1)
+                      );
+                      
+                      console.log('🎉 DeliveryConfirmed event detected:');
+                      console.log('- Event itemId:', decodedLog.itemId);
+                      console.log('- Event buyer:', decodedLog.buyer);
+                      
+                      // Verify escrow ID matches
+                      if (decodedLog.itemId === finalEscrowId) {
+                        console.log('✅ Event escrowId matches payment escrowId');
+                        foundEvent = true;
+                      } else {
+                        console.log('⚠️ Event escrowId does not match payment escrowId');
+                      }
+                    }
+                  }
+                } catch (error) {
+                  console.log(`Error decoding log ${index}:`, error.message);
+                }
+              });
+              
+              if (!foundEvent) {
+                console.log('⚠️ No DeliveryConfirmed event found in transaction logs');
+                // We still proceed as the function might have been called successfully
+                // even if we couldn't decode the event
+              }
+            }
+            
+          } catch (error) {
+            console.error('Error decoding transaction input:', error);
+            // We don't fail here, as we still want to update our database
+            // The transaction was successful on the blockchain
+          }
+        } catch (error) {
+          console.error('Error verifying transaction:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to verify transaction on blockchain'
+          });
+        }
+      }
       
       // Update payment status
       payment.status = 'escrow_released';
@@ -811,6 +1122,11 @@ export const confirmDelivery = async (req, res) => {
       if (payment.escrowDetails) {
         payment.escrowDetails.isDelivered = true;
         payment.escrowDetails.deliveryConfirmedAt = new Date();
+        
+        // Store transaction hash if provided
+        if (transactionHash) {
+          payment.escrowDetails.deliveryTransactionHash = transactionHash;
+        }
       }
       
       await payment.save();
@@ -859,11 +1175,183 @@ export const confirmDelivery = async (req, res) => {
   }
 };
 
+// Admin endpoint to update escrow status after manual confirmation
+export const adminUpdateEscrowStatus = async (req, res) => {
+  try {
+    const { escrowId, transactionHash } = req.body;
+    
+    if (!escrowId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Escrow ID is required'
+      });
+    }
+    
+    console.log('🔄 Admin updating escrow status:');
+    console.log('- Escrow ID:', escrowId);
+    console.log('- Transaction Hash:', transactionHash);
+    
+    // Find payment by escrow ID
+    const payment = await Payment.findOne({ 'escrowDetails.escrowId': escrowId });
+    
+    if (!payment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Payment with this escrow ID not found'
+      });
+    }
+    
+    console.log('- Payment found:', {
+      id: payment._id,
+      status: payment.status,
+      buyerId: payment.buyerId,
+      sellerId: payment.sellerId
+    });
+    
+    // Verify current status
+    if (payment.status !== 'escrow_held') {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot update payment in ${payment.status} status`
+      });
+    }
+    
+    // Verify transaction on blockchain if provided
+    if (transactionHash && process.env.NODE_ENV !== 'development') {
+      try {
+        const web3 = new Web3(process.env.SEPOLIA_RPC_URL || `https://eth-sepolia.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`);
+        
+        // Get transaction receipt
+        const txReceipt = await web3.eth.getTransactionReceipt(transactionHash);
+        
+        if (!txReceipt || txReceipt.status !== true) {
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid transaction or transaction failed'
+          });
+        }
+        
+        // Verify transaction is to the escrow contract
+        if (txReceipt.to.toLowerCase() !== payment.escrowDetails.contractAddress.toLowerCase()) {
+          return res.status(400).json({
+            success: false,
+            message: 'Transaction is not to the escrow contract'
+          });
+        }
+        
+        // Get full transaction data
+        const txData = await web3.eth.getTransaction(transactionHash);
+        
+        // Try to decode logs as DeliveryConfirmed events
+        let foundEvent = false;
+        if (txReceipt.logs) {
+          console.log(`📊 Found ${txReceipt.logs.length} log entries in transaction`);
+          
+          // Define the event signature
+          const eventSignature = web3.utils.sha3('DeliveryConfirmed(string,address)');
+          
+          txReceipt.logs.forEach((log, index) => {
+            try {
+              // Check if this log is from our contract and has the right event signature
+              if (log.address.toLowerCase() === payment.escrowDetails.contractAddress.toLowerCase() &&
+                  log.topics && log.topics[0] === eventSignature) {
+                
+                // Decode the event data
+                const decodedLog = web3.eth.abi.decodeLog(
+                  [
+                    { type: 'string', name: 'itemId' },
+                    { type: 'address', name: 'buyer' }
+                  ],
+                  log.data,
+                  log.topics.slice(1)
+                );
+                
+                console.log('🎉 DeliveryConfirmed event detected:');
+                console.log('- Event itemId:', decodedLog.itemId);
+                console.log('- Event buyer:', decodedLog.buyer);
+                
+                // Verify escrow ID matches
+                if (decodedLog.itemId === escrowId) {
+                  console.log('✅ Event escrowId matches provided escrowId');
+                  foundEvent = true;
+                }
+              }
+            } catch (error) {
+              console.log(`Error decoding log ${index}:`, error.message);
+            }
+          });
+        }
+        
+        if (!foundEvent) {
+          console.log('⚠️ No DeliveryConfirmed event found for this escrow ID');
+          // We still proceed as the function might have been called successfully
+        }
+        
+      } catch (error) {
+        console.error('Error verifying transaction:', error);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to verify transaction on blockchain'
+        });
+      }
+    }
+    
+    // Update payment status
+    payment.status = 'escrow_released';
+    payment.completedAt = new Date();
+    
+    if (payment.escrowDetails) {
+      payment.escrowDetails.isDelivered = true;
+      payment.escrowDetails.deliveryConfirmedAt = new Date();
+      
+      // Store transaction hash if provided
+      if (transactionHash) {
+        payment.escrowDetails.deliveryTransactionHash = transactionHash;
+      }
+    }
+    
+    await payment.save();
+    
+    // Create notification for seller
+    const notification = {
+      recipient: payment.sellerId,
+      type: 'escrow_released',
+      title: 'Escrow Released!',
+      message: 'Your escrow payment has been released.',
+      data: {
+        paymentId: payment._id,
+        itemId: payment.itemId
+      },
+      read: false
+    };
+    
+    // Use your notification model to save this
+    // await Notification.create(notification);
+    
+    return res.status(200).json({
+      success: true,
+      message: 'Escrow status updated to released',
+      payment
+    });
+    
+  } catch (error) {
+    console.error('Error updating escrow status:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update escrow status',
+      error: error.message
+    });
+  }
+};
+
 // Get payment history for user
 export const getPaymentHistory = async (req, res) => {
   try {
     const userId = req.user._id;
     const { type } = req.query; // 'purchases' or 'sales'
+
+    console.log('🔄 Fetching payment history for user:', userId);
+    console.log('- Type:', type || 'purchases (default)');
 
     let query = {};
     if (type === 'purchases') {
@@ -889,6 +1377,23 @@ export const getPaymentHistory = async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(50);
 
+    console.log(`📊 Found ${payments.length} payments`);
+    
+    // Log escrow-related payments
+    const escrowPayments = payments.filter(payment => 
+      payment.status === 'escrow_held' || payment.status === 'escrow_released'
+    );
+    
+    if (escrowPayments.length > 0) {
+      console.log(`🔐 Found ${escrowPayments.length} escrow payments:`);
+      escrowPayments.forEach((payment, index) => {
+        console.log(`- Escrow Payment ${index + 1}:`);
+        console.log(`  ID: ${payment._id}`);
+        console.log(`  Status: ${payment.status}`);
+        console.log(`  Escrow Details:`, payment.escrowDetails || 'None');
+      });
+    }
+
     // Transform the data to match frontend expectations
     const transformedPayments = payments.map(payment => ({
       _id: payment._id,
@@ -900,7 +1405,8 @@ export const getPaymentHistory = async (req, res) => {
       transactionId: payment.transactionId,
       completedAt: payment.completedAt,
       createdAt: payment.createdAt,
-      failureReason: payment.failureReason
+      failureReason: payment.failureReason,
+      escrowDetails: payment.escrowDetails
     }));
 
     res.json({
@@ -1057,6 +1563,74 @@ export const getSellerEscrows = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to get seller escrows',
+      error: error.message
+    });
+  }
+};
+
+// Check escrow details for a specific payment
+export const checkEscrowDetails = async (req, res) => {
+  try {
+    const { paymentId } = req.params;
+    const userId = req.user._id;
+
+    console.log('🔄 Checking escrow details for payment:', paymentId);
+    
+    // Find payment
+    const payment = await Payment.findById(paymentId);
+    
+    if (!payment) {
+      console.log('❌ Payment not found:', paymentId);
+      return res.status(404).json({
+        success: false,
+        message: 'Payment not found'
+      });
+    }
+
+    // Verify user is the buyer
+    if (payment.buyerId.toString() !== userId.toString()) {
+      console.log('❌ User is not the buyer of this payment');
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to access this payment'
+      });
+    }
+
+    console.log('📊 Payment details:');
+    console.log('- ID:', payment._id);
+    console.log('- Status:', payment.status);
+    console.log('- Escrow Details:', payment.escrowDetails || 'None');
+
+    // Check if escrow details exist
+    if (!payment.escrowDetails || !payment.escrowDetails.escrowId || !payment.escrowDetails.contractAddress) {
+      console.log('❌ Escrow details missing for payment:', paymentId);
+      return res.status(400).json({
+        success: false,
+        message: 'Escrow details not found for this payment',
+        payment: {
+          _id: payment._id,
+          status: payment.status,
+          escrowDetails: payment.escrowDetails || null
+        }
+      });
+    }
+
+    // Return escrow details
+    return res.status(200).json({
+      success: true,
+      message: 'Escrow details found',
+      escrowDetails: payment.escrowDetails,
+      payment: {
+        _id: payment._id,
+        status: payment.status
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error checking escrow details:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to check escrow details',
       error: error.message
     });
   }

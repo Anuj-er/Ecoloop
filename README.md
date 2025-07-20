@@ -7,9 +7,9 @@
 [![MongoDB](https://img.shields.io/badge/MongoDB-4.4+-green.svg)](https://mongodb.com/)
 [![Ethereum](https://img.shields.io/badge/Blockchain-Ethereum-blue.svg)](https://ethereum.org/)
 
-## 🎯 **What is EcoLoop AI?**
+## 🎯 **What is Ecoloop?**
 
-EcoLoop AI is a comprehensive sustainable marketplace platform featuring:
+Ecoloop is a comprehensive sustainable marketplace platform featuring:
 
 - **🛒 Smart Marketplace** - Buy/sell eco-friendly materials with AI-powered fraud detection
 - **🤝 Eco Connect** - Network with sustainability enthusiasts and businesses  
@@ -164,7 +164,7 @@ MIT License - feel free to use this project for learning and building your own s
 ---
 
 ### 🌍 **Join the Movement**
-Every transaction on EcoLoop AI contributes to a more sustainable future. Start your eco-journey today!
+Every transaction on Ecoloop contributes to a more sustainable future. Start your eco-journey today!
 
 **📹 Live Demo**: [Watch on YouTube](https://youtu.be/zQkFUziNMN0?si=__2dLU80eUUcKG0D)  
 **📚 Documentation**: [Wiki](https://github.com/AkankshaMishra2/Ecoloop/wiki)  

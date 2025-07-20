@@ -66,7 +66,7 @@ export const Navbar = ({ onSectionChange, currentSection }: NavbarProps) => {
             <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center">
               <span className="text-white font-bold text-sm">E</span>
             </div>
-            <span className="font-bold text-lg text-gray-800">EcoLoop AI</span>
+            <span className="font-bold text-lg text-gray-800">Ecoloop</span>
           </div>
 
           {/* Desktop Navigation */}

@@ -479,15 +479,26 @@ const CryptoPaymentForm = ({
         const sellerAddress = item?.paymentPreferences?.cryptoAddress;
         if (!sellerAddress) throw new Error('Seller crypto address not found');
         
+        // Get buyer's address
+        const currentAddress = await signer.getAddress();
+        
+        // Check if buyer and seller are the same
+        if (sellerAddress.toLowerCase() === currentAddress.toLowerCase()) {
+          throw new Error('You cannot buy your own item');
+        }
+        
         console.log('📋 Checking for existing escrow...');
         
         // Create a unique escrow ID by combining item ID, buyer address, and timestamp
-        // This allows multiple purchases of the same item by the same buyer
-        const currentAddress = await signer.getAddress();
+        // Format: itemId-buyerAddress-timestamp
+        // This format must be consistent across frontend, backend, and contract
         const timestamp = Date.now();
         escrowId = `${item?._id}-${currentAddress.toLowerCase()}-${timestamp}`;
         
         console.log('Using unique escrow ID:', escrowId);
+        console.log('- Item ID:', item?._id);
+        console.log('- Buyer address:', currentAddress.toLowerCase());
+        console.log('- Timestamp:', timestamp);
         
         // Check if escrow already exists for this unique ID
         try {
@@ -599,8 +610,33 @@ const CryptoPaymentForm = ({
         throw new Error(response.data.message || 'Payment verification failed');
       }
     } catch (error: any) {
+      setIsProcessing(false);
+      
+      // Parse error message for better user experience
+      let errorMessage = error.message || 'Payment failed';
+      
+      // Check for specific error messages from the contract
+      if (errorMessage.includes('Buyer and seller cannot be the same')) {
+        errorMessage = 'You cannot buy your own item. Please use a different wallet address.';
+      } else if (errorMessage.includes('Escrow already exists for this item')) {
+        errorMessage = 'You already have an active escrow for this item. Please check your purchase history.';
+      } else if (errorMessage.includes('User rejected')) {
+        errorMessage = 'Transaction was rejected in your wallet.';
+      } else if (errorMessage.includes('insufficient funds')) {
+        errorMessage = 'Your wallet has insufficient funds for this transaction.';
+      } else if (errorMessage.includes('CALL_EXCEPTION')) {
+        // For generic contract errors, try to extract the reason
+        const reasonMatch = error.message.match(/reason="([^"]+)"/);
+        if (reasonMatch && reasonMatch[1]) {
+          errorMessage = `Contract error: ${reasonMatch[1]}`;
+        } else {
+          errorMessage = 'Transaction failed. Please check your wallet and try again.';
+        }
+      }
+      
       console.error('❌ Crypto payment error:', error);
-      onError(`Payment failed: ${error.message}`);
+      toast.error(errorMessage);
+      onError(errorMessage);
     } finally {
       setIsProcessing(false);
     }

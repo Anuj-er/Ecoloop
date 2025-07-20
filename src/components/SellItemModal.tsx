@@ -1007,7 +1007,7 @@ export const SellItemModal = ({ isOpen, onClose, onSuccess }: Props) => {
                   <div className="mt-4 text-sm border-t border-red-300 pt-3">
                     <div className="flex items-center mb-2">
                       <Camera className="h-4 w-4 mr-2 text-red-600" />
-                      <p className="font-medium">EcoLoop AI Image Guidelines</p>
+                      <p className="font-medium">Ecoloop Image Guidelines</p>
                     </div>
                     
                     <div className="bg-white p-3 rounded-md shadow-sm border border-red-100">

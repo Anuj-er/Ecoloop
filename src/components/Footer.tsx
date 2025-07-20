@@ -87,7 +87,7 @@ export const Footer = () => {
         {/* Bottom Footer */}
         <div className="border-t border-gray-700 pt-8 text-center">
           <div className="mb-4">
-            <h2 className="text-3xl font-bold text-green-400 mb-2">EcoLoop AI</h2>
+            <h2 className="text-3xl font-bold text-green-400 mb-2">Ecoloop</h2>
             <p className="text-gray-400">Turning Waste Into Worth</p>
           </div>
           
@@ -97,7 +97,7 @@ export const Footer = () => {
               <span className="ml-2">Chitkara University</span>
             </p>
             <p className="text-sm">
-              Built with ❤️ for a sustainable future | © 2025 EcoLoop AI
+              Built with ❤️ for a sustainable future | © 2025 Ecoloop
             </p>
           </div>
         </div>

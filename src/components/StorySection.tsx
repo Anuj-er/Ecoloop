@@ -25,7 +25,7 @@ export const StorySection = () => {
               </p>
               <div className="bg-green-50 p-6 rounded-2xl border-l-4 border-green-500">
                 <p className="text-lg text-gray-700 leading-relaxed font-medium">
-                  "EcoLoop AI helped me connect with a pillow factory that turns my scraps into stuffing. 
+                  "Ecoloop helped me connect with a pillow factory that turns my scraps into stuffing. 
                   Now I earn ₹200 extra daily and feel good about helping the environment!"
                 </p>
               </div>

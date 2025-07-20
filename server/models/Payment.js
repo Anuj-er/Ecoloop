@@ -86,7 +86,8 @@ const paymentSchema = new mongoose.Schema({
       type: Boolean,
       default: false
     },
-    deliveryConfirmedAt: Date
+    deliveryConfirmedAt: Date,
+    deliveryTransactionHash: String
   },
   quantity: {
     type: Number,
