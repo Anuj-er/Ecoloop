@@ -284,6 +284,28 @@ class PaymentService {
     try {
       const accounts = await this.connectWallet();
       const buyerAddress = accounts[0];
+      
+      console.log("Confirming delivery for escrow ID:", itemId);
+      console.log("Buyer address:", buyerAddress);
+      
+      // Get escrow details before confirmation
+      try {
+        const escrowBefore = await this.escrowContract.methods.getEscrowDetails(itemId).call();
+        console.log("Escrow before confirmation:", {
+          buyer: escrowBefore[0],
+          seller: escrowBefore[1],
+          amount: this.web3.utils.fromWei(escrowBefore[2], 'ether'),
+          isDelivered: escrowBefore[3],
+          isCompleted: escrowBefore[4],
+          createdAt: new Date(Number(escrowBefore[5]) * 1000).toISOString()
+        });
+        
+        // Check seller's balance before confirmation
+        const sellerBalanceBefore = await this.escrowContract.methods.getBalance(escrowBefore[1]).call();
+        console.log("Seller balance before confirmation:", this.web3.utils.fromWei(sellerBalanceBefore, 'ether'), "ETH");
+      } catch (error) {
+        console.log("Could not get escrow details before confirmation:", error);
+      }
 
       const transaction = await this.escrowContract.methods
         .confirmDelivery(itemId)
@@ -291,12 +313,34 @@ class PaymentService {
           from: buyerAddress,
           gas: 150000
         });
+      
+      console.log("Confirmation transaction:", transaction);
+      
+      // Get escrow details after confirmation
+      try {
+        const escrowAfter = await this.escrowContract.methods.getEscrowDetails(itemId).call();
+        console.log("Escrow after confirmation:", {
+          buyer: escrowAfter[0],
+          seller: escrowAfter[1],
+          amount: this.web3.utils.fromWei(escrowAfter[2], 'ether'),
+          isDelivered: escrowAfter[3],
+          isCompleted: escrowAfter[4],
+          createdAt: new Date(Number(escrowAfter[5]) * 1000).toISOString()
+        });
+        
+        // Check seller's balance after confirmation
+        const sellerBalanceAfter = await this.escrowContract.methods.getBalance(escrowAfter[1]).call();
+        console.log("Seller balance after confirmation:", this.web3.utils.fromWei(sellerBalanceAfter, 'ether'), "ETH");
+      } catch (error) {
+        console.log("Could not get escrow details after confirmation:", error);
+      }
 
       return {
         success: true,
         transactionHash: transaction.transactionHash
       };
     } catch (error) {
+      console.error("Error confirming delivery:", error);
       return {
         success: false,
         error: 'Delivery confirmation failed: ' + (error as Error).message
@@ -327,8 +371,31 @@ class PaymentService {
       throw new Error('Web3 or contract not initialized');
     }
 
-    const balance = await this.escrowContract.methods.getBalance(address).call();
-    return this.web3.utils.fromWei(balance, 'ether');
+    console.log("Checking balance for address:", address);
+    console.log("Contract address:", this.escrowContract._address);
+    
+    try {
+      // Normalize address to lowercase
+      const normalizedAddress = address.toLowerCase();
+      console.log("Normalized address:", normalizedAddress);
+      
+      const balance = await this.escrowContract.methods.getBalance(address).call();
+      console.log("Raw balance from contract:", balance);
+      
+      // Try with checksum address
+      const checksumAddress = this.web3.utils.toChecksumAddress(address);
+      console.log("Checksum address:", checksumAddress);
+      
+      const balanceWithChecksum = await this.escrowContract.methods.getBalance(checksumAddress).call();
+      console.log("Balance with checksum address:", balanceWithChecksum);
+      
+      // Return the larger of the two balances
+      const finalBalance = BigInt(balance) > BigInt(balanceWithChecksum) ? balance : balanceWithChecksum;
+      return this.web3.utils.fromWei(finalBalance, 'ether');
+    } catch (error) {
+      console.error("Error getting balance from contract:", error);
+      throw error;
+    }
   }
 
   // Withdraw available balance
@@ -340,6 +407,16 @@ class PaymentService {
     try {
       const accounts = await this.connectWallet();
       const userAddress = accounts[0];
+      
+      console.log("Withdrawing funds for address:", userAddress);
+      
+      // Check balance before withdrawal
+      const balanceBefore = await this.escrowContract.methods.getBalance(userAddress).call();
+      console.log("Balance before withdrawal:", this.web3.utils.fromWei(balanceBefore, 'ether'), "ETH");
+      
+      if (BigInt(balanceBefore) === 0n) {
+        return { success: false, error: 'No funds available to withdraw' };
+      }
 
       const transaction = await this.escrowContract.methods
         .withdraw()
@@ -347,12 +424,19 @@ class PaymentService {
           from: userAddress,
           gas: 150000
         });
+      
+      console.log("Withdrawal transaction:", transaction);
+
+      // Check balance after withdrawal
+      const balanceAfter = await this.escrowContract.methods.getBalance(userAddress).call();
+      console.log("Balance after withdrawal:", this.web3.utils.fromWei(balanceAfter, 'ether'), "ETH");
 
       return {
         success: true,
         transactionHash: transaction.transactionHash
       };
     } catch (error) {
+      console.error("Error withdrawing funds:", error);
       return {
         success: false,
         error: 'Withdrawal failed: ' + (error as Error).message

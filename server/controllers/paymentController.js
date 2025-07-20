@@ -533,7 +533,7 @@ export const verifyPayment = async (req, res) => {
 // Process crypto payment
 export const processCryptoPayment = async (req, res) => {
   try {
-    const { itemId, quantity, transactionHash, walletAddress, useEscrow } = req.body;
+    const { itemId, quantity, transactionHash, walletAddress, useEscrow, escrowId } = req.body;
     const buyerId = req.user._id;
 
     // Validate request data
@@ -541,6 +541,14 @@ export const processCryptoPayment = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Missing required fields'
+      });
+    }
+    
+    // Validate escrow ID if using escrow
+    if (useEscrow && !escrowId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Escrow ID is required when using escrow'
       });
     }
 
@@ -669,7 +677,7 @@ export const processCryptoPayment = async (req, res) => {
       status: useEscrow ? 'escrow_held' : 'completed',
       escrowDetails: useEscrow ? {
         contractAddress: process.env.ESCROW_CONTRACT_ADDRESS,
-        escrowId: itemId, // Using itemId as escrow identifier
+        escrowId: escrowId, // Using the unique escrow ID from frontend
         isDelivered: false
       } : null,
       metadata: {
@@ -685,11 +693,30 @@ export const processCryptoPayment = async (req, res) => {
     await payment.save();
 
     // Update item quantity
-    item.quantity -= quantity;
-    if (item.quantity === 0) {
-      item.status = 'sold';
+    if (item.quantity >= quantity) {
+      // Calculate new quantity
+      const newQuantity = item.quantity - quantity;
+      
+      // Update item with validation bypass for zero quantity
+      await MarketplaceItem.findByIdAndUpdate(
+        itemId,
+        { 
+          $set: { 
+            quantity: newQuantity,
+            status: newQuantity === 0 ? 'sold' : 'active'
+          }
+        },
+        { 
+          new: true,
+          runValidators: false // Skip validation to allow quantity to be 0
+        }
+      );
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: 'Insufficient quantity available'
+      });
     }
-    await item.save();
 
     // After successful payment (crypto), update user's totalCO2Saved
     if (buyerId) {
@@ -928,6 +955,108 @@ export const getPaymentDetails = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to get payment details',
+      error: error.message
+    });
+  }
+};
+
+// Check escrow balance for a user
+export const checkEscrowBalance = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const userAddress = req.query.address;
+    
+    // If no address is provided, we can't check the balance
+    if (!userAddress) {
+      return res.status(400).json({
+        success: false,
+        message: 'Ethereum address is required to check escrow balance'
+      });
+    }
+    
+    // This would typically involve querying the blockchain
+    // For now, we'll just return a simple response
+    // In a real implementation, you would use Web3.js to call the contract's getBalance function
+    
+    res.json({
+      success: true,
+      message: 'Escrow balance retrieved successfully',
+      data: {
+        address: userAddress,
+        // This would come from the blockchain in a real implementation
+        balance: '0.0',
+        // Include any pending payments that might be available for withdrawal
+        pendingPayments: []
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error checking escrow balance:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to check escrow balance',
+      error: error.message
+    });
+  }
+};
+
+// Get seller escrows
+export const getSellerEscrows = async (req, res) => {
+  try {
+    const { address } = req.query;
+    
+    if (!address) {
+      return res.status(400).json({
+        success: false,
+        message: 'Seller address is required'
+      });
+    }
+    
+    // Normalize address to lowercase for consistent comparison
+    const normalizedAddress = address.toLowerCase();
+    
+    // Find payments where the seller's crypto address matches
+    const payments = await Payment.find({
+      'paymentMethod.type': 'crypto',
+      status: { $in: ['escrow_held', 'escrow_released'] }
+    }).populate({
+      path: 'itemId',
+      select: 'title seller paymentPreferences'
+    });
+    
+    // Filter payments where the seller's address matches
+    const sellerEscrows = payments.filter(payment => {
+      if (!payment.itemId?.paymentPreferences?.cryptoAddress) return false;
+      return payment.itemId.paymentPreferences.cryptoAddress.toLowerCase() === normalizedAddress;
+    });
+    
+    // Transform to the expected format
+    const escrows = sellerEscrows.map(payment => {
+      const escrowId = payment.escrowDetails?.escrowId || payment._id.toString();
+      
+      return {
+        id: escrowId,
+        paymentId: payment._id,
+        buyer: payment.metadata?.walletAddress || 'Unknown',
+        seller: payment.itemId?.paymentPreferences?.cryptoAddress || 'Unknown',
+        amount: payment.amount,
+        isDelivered: payment.status === 'escrow_released',
+        isCompleted: payment.status === 'completed',
+        createdAt: payment.createdAt,
+        itemTitle: payment.itemId?.title || 'Unknown Item'
+      };
+    });
+    
+    return res.status(200).json({
+      success: true,
+      escrows
+    });
+    
+  } catch (error) {
+    console.error('Error getting seller escrows:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to get seller escrows',
       error: error.message
     });
   }

@@ -9,11 +9,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProfileCompletionModal } from "./ProfileCompletionModal";
 import { CreatePostModal } from "./CreatePostModal";
 import { ImpactCard } from "./ImpactCard";
+import { SellerEscrowsModal } from "./SellerEscrowsModal";
 import { useAuth } from "@/contexts/AuthContext";
 import { usersAPI, postsAPI, connectionsAPI } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
-import { TrendingUp, Award, Globe, Building } from "lucide-react";
+import { TrendingUp, Award, Globe, Building, Wallet, HelpCircle } from "lucide-react";
 import { MessageCircle, Share2, Heart, Plus, Eye, Trash2, Send, X } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 export const Profile = () => {
   const { user, updateUser } = useAuth();
@@ -22,6 +24,7 @@ export const Profile = () => {
   const [showCompletionModal, setShowCompletionModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showCreatePostModal, setShowCreatePostModal] = useState(false);
+  const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [postToDelete, setPostToDelete] = useState<any>(null);
   const [userPosts, setUserPosts] = useState([]);
@@ -347,6 +350,27 @@ export const Profile = () => {
                     Marketplace
                   </Button>
                 </div>
+                {/* Withdraw Funds Button for Sellers */}
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button 
+                        variant="default"
+                        className="bg-green-600 hover:bg-green-700"
+                        onClick={() => setShowWithdrawModal(true)}
+                      >
+                        <Wallet className="w-4 h-4 mr-2" />
+                        Escrow Dashboard
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs">
+                      <div className="space-y-1">
+                        <p className="font-semibold">Seller Escrow Dashboard</p>
+                        <p>View and manage your escrow transactions. Connect the same wallet you used when listing items to access your funds.</p>
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               </div>
             </div>
 
@@ -762,6 +786,16 @@ export const Profile = () => {
         onClose={() => setShowCreatePostModal(false)}
         onPostCreated={() => {
           setShowCreatePostModal(false);
+          loadUserData();
+        }}
+      />
+
+      {/* Withdraw Funds Modal */}
+      <SellerEscrowsModal
+        isOpen={showWithdrawModal}
+        onClose={() => setShowWithdrawModal(false)}
+        onSuccess={() => {
+          setShowWithdrawModal(false);
           loadUserData();
         }}
       />

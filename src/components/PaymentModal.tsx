@@ -450,6 +450,7 @@ const CryptoPaymentForm = ({
     
     try {
       let transactionHash;
+      let escrowId;
       
       // Debug logging
       console.log('🔍 Payment Debug Info:');
@@ -480,16 +481,17 @@ const CryptoPaymentForm = ({
         
         console.log('📋 Checking for existing escrow...');
         
-        // Create a unique escrow ID by combining item ID and buyer address
-        // This allows multiple buyers to create escrows for the same item
+        // Create a unique escrow ID by combining item ID, buyer address, and timestamp
+        // This allows multiple purchases of the same item by the same buyer
         const currentAddress = await signer.getAddress();
-        const uniqueEscrowId = `${item?._id}-${currentAddress.toLowerCase()}`;
+        const timestamp = Date.now();
+        escrowId = `${item?._id}-${currentAddress.toLowerCase()}-${timestamp}`;
         
-        console.log('Using unique escrow ID:', uniqueEscrowId);
+        console.log('Using unique escrow ID:', escrowId);
         
         // Check if escrow already exists for this unique ID
         try {
-          const escrowDetails = await escrowContract.getEscrowDetails(uniqueEscrowId);
+          const escrowDetails = await escrowContract.getEscrowDetails(escrowId);
           const escrowExists = escrowDetails.buyer !== '0x0000000000000000000000000000000000000000';
           
           if (escrowExists) {
@@ -500,7 +502,13 @@ const CryptoPaymentForm = ({
             console.log('- Is Delivered:', escrowDetails.isDelivered);
             console.log('- Is Completed:', escrowDetails.isCompleted);
             
-            throw new Error('You already have an active escrow for this item. Please check your purchase history.');
+            if (escrowDetails.isCompleted) {
+              // If escrow is already completed, allow creating a new one (this is a new purchase)
+              console.log('✅ Previous escrow is completed, allowing new purchase');
+            } else {
+              // If escrow exists but is not completed, don't allow creating a new one
+              throw new Error('You already have an active escrow for this item. Please check your purchase history.');
+            }
           }
         } catch (error: any) {
           // If it's our custom error about existing escrow, throw it
@@ -513,13 +521,13 @@ const CryptoPaymentForm = ({
         
         console.log('📋 Creating new escrow with:');
         console.log('- Seller Address:', sellerAddress);
-        console.log('- Unique Escrow ID:', uniqueEscrowId);
+        console.log('- Unique Escrow ID:', escrowId);
         console.log('- Amount:', ethAmount, 'ETH');
         
         // Create escrow transaction with unique ID
         const tx = await escrowContract.createEscrow(
           sellerAddress,
-          uniqueEscrowId,
+          escrowId,
           {
             value: ethers.utils.parseEther(ethAmount),
             gasLimit: 300000
@@ -562,13 +570,18 @@ const CryptoPaymentForm = ({
       if (!transactionHash) throw new Error('Transaction failed');
       
       // Notify backend about the crypto payment
-      const paymentData = {
+      const paymentData: any = {
         itemId: item?._id,
         quantity,
         transactionHash,
         walletAddress,
         useEscrow
       };
+      
+      // Add escrow ID if using escrow
+      if (useEscrow && escrowId) {
+        paymentData.escrowId = escrowId;
+      }
       
       console.log('📤 Sending to backend:', paymentData);
       

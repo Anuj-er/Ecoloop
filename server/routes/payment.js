@@ -1,29 +1,40 @@
 import express from 'express';
-import {
-  createPaymentIntent,
-  verifyPayment,
-  processCryptoPayment,
+import { 
+  createPaymentIntent, 
+  verifyPayment, 
+  processCryptoPayment, 
   confirmDelivery,
   getPaymentHistory,
-  getPaymentDetails
+  getPaymentDetails,
+  checkEscrowBalance,
+  getSellerEscrows
 } from '../controllers/paymentController.js';
 import { protect } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Apply authentication middleware to all routes
-router.use(protect);
+// Create payment intent (Stripe)
+router.post('/create-payment-intent', protect, createPaymentIntent);
 
-// Fiat payment routes
-router.post('/create-payment-intent', createPaymentIntent);
-router.post('/verify', verifyPayment);
+// Verify payment completion
+router.post('/verify-payment', protect, verifyPayment);
 
-// Crypto payment routes
-router.post('/crypto', processCryptoPayment);
-router.post('/confirm-delivery', confirmDelivery);
+// Process crypto payment
+router.post('/process-crypto-payment', protect, processCryptoPayment);
 
-// Payment history and details
-router.get('/history', getPaymentHistory);
-router.get('/:paymentId', getPaymentDetails);
+// Confirm delivery (release escrow)
+router.post('/confirm-delivery', protect, confirmDelivery);
+
+// Get payment history
+router.get('/history', protect, getPaymentHistory);
+
+// Get payment details
+router.get('/details/:paymentId', protect, getPaymentDetails);
+
+// Check escrow balance
+router.get('/escrow-balance', protect, checkEscrowBalance);
+
+// Get seller escrows
+router.get('/seller-escrows', protect, getSellerEscrows);
 
 export default router;

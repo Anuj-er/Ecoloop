@@ -166,7 +166,7 @@ export const paymentAPI = {
   verifyPayment: (data: {
     paymentIntentId: string;
     paymentId: string;
-  }) => api.post('/payments/verify', data),
+  }) => api.post('/payments/verify-payment', data),
   
   // Process crypto payment
   processCryptoPayment: (data: {
@@ -174,7 +174,7 @@ export const paymentAPI = {
     quantity: number;
     transactionHash: string;
     walletAddress: string;
-  }) => api.post('/payments/crypto', data),
+  }) => api.post('/payments/process-crypto-payment', data),
   
   // Confirm delivery
   confirmDelivery: (data: { paymentId: string }) =>
@@ -186,7 +186,15 @@ export const paymentAPI = {
   
   // Get payment details
   getPaymentDetails: (paymentId: string) =>
-    api.get(`/payments/${paymentId}`)
+    api.get(`/payments/details/${paymentId}`),
+    
+  // Check escrow balance
+  checkEscrowBalance: (address: string) =>
+    api.get(`/payments/escrow-balance?address=${address}`),
+    
+  // Get seller escrows
+  getSellerEscrows: (address: string) =>
+    api.get(`/payments/seller-escrows?address=${address}`)
 };
 
 export default api;
